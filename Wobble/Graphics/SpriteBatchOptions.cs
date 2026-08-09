@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using MonoGame.Extended;
 using Wobble.Graphics.Shaders;
 using Wobble.Window;
 
@@ -23,10 +24,28 @@ namespace Wobble.Graphics
             new Dictionary<RasterizerState, RasterizerState>();
 
         /// <summary>
-        ///     Optional virtual-screen clipping rectangle applied to sprite batches while the current screen is drawn.
-        ///     Render targets are intentionally excluded because their coordinates are local to the target.
+        ///     Temporary virtual-screen clip inherited by nested draw scopes. Render targets are intentionally excluded
+        ///     because their coordinates are local to the target.
         /// </summary>
-        internal static Rectangle? ActiveScreenClipRectangle { get; set; }
+        internal static Rectangle? ActiveClipRectangle { get; set; }
+
+        internal static Rectangle? PushClip(RectangleF rectangle)
+        {
+            var previousClip = ActiveClipRectangle;
+            var left = (int) Math.Floor(rectangle.Left);
+            var top = (int) Math.Floor(rectangle.Top);
+            var right = (int) Math.Ceiling(rectangle.Right);
+            var bottom = (int) Math.Ceiling(rectangle.Bottom);
+            var clip = new Rectangle(left, top, right - left, bottom - top);
+
+            if (previousClip.HasValue)
+                clip = Rectangle.Intersect(previousClip.Value, clip);
+
+            ActiveClipRectangle = clip;
+            return previousClip;
+        }
+
+        internal static void RestoreClip(Rectangle? rectangle) => ActiveClipRectangle = rectangle;
 
         public SpriteSortMode SortMode { get; set; } = SpriteSortMode.Deferred;
         public BlendState BlendState { get; set; } = BlendState.NonPremultiplied;
@@ -67,9 +86,9 @@ namespace Wobble.Graphics
             var rasterizerState = RasterizerState;
             var graphicsDevice = GameBase.Game.GraphicsDevice;
 
-            if (ActiveScreenClipRectangle.HasValue && graphicsDevice.GetRenderTargets().Length == 0)
+            if (ActiveClipRectangle.HasValue && graphicsDevice.GetRenderTargets().Length == 0)
             {
-                var clipRectangle = ToBackBufferRectangle(ActiveScreenClipRectangle.Value);
+                var clipRectangle = ToBackBufferRectangle(ActiveClipRectangle.Value);
 
                 if (graphicsDevice.RasterizerState?.ScissorTestEnable == true)
                     clipRectangle = Rectangle.Intersect(clipRectangle, graphicsDevice.ScissorRectangle);

@@ -7,6 +7,7 @@ using MonoGame.Extended;
 using Wobble.Graphics;
 using Wobble.Graphics.Sprites;
 using Wobble.Graphics.Sprites.Text;
+using Wobble.Window;
 
 namespace Wobble.Graphics.UI.Debugging
 {
@@ -16,6 +17,8 @@ namespace Wobble.Graphics.UI.Debugging
         private static readonly List<Entry> Entries = new List<Entry>();
         private static readonly Dictionary<int, Entry> EntriesById = new Dictionary<int, Entry>();
         private static readonly List<int> CurrentFrameDrawIds = new List<int>();
+        private static readonly Dictionary<int, RectangleF> CurrentFrameDrawRectangles =
+            new Dictionary<int, RectangleF>();
         private static int nextId = 1;
 
         public static int Register(Drawable drawable)
@@ -55,12 +58,22 @@ namespace Wobble.Graphics.UI.Debugging
         public static void ResetFrame()
         {
             CurrentFrameDrawIds.Clear();
+            CurrentFrameDrawRectangles.Clear();
         }
 
         public static void RecordDraw(Drawable drawable)
         {
             CurrentFrameDrawIds.Add(drawable.DebugId);
+
+            var drawRectangle = GetClippedDrawRectangle(drawable.ScreenRectangle);
+            if (CurrentFrameDrawRectangles.TryGetValue(drawable.DebugId, out var previousRectangle))
+                drawRectangle = Union(previousRectangle, drawRectangle);
+
+            CurrentFrameDrawRectangles[drawable.DebugId] = drawRectangle;
         }
+
+        internal static bool TryGetCurrentFrameDrawRectangle(int id, out RectangleF rectangle) =>
+            CurrentFrameDrawRectangles.TryGetValue(id, out rectangle);
 
         public static List<DrawableTypeDebugInfo> Snapshot(bool visibleOnly)
         {
@@ -102,7 +115,8 @@ namespace Wobble.Graphics.UI.Debugging
                     if (!frameCounts.TryGetValue(pair.Key, out var drawCount))
                         continue;
 
-                    var info = CreateInfo(drawable, drawCount);
+                    var drawRectangle = CurrentFrameDrawRectangles[pair.Key];
+                    var info = CreateInfo(drawable, drawCount, drawRectangle);
                     builder.DrawnCount += drawCount;
                     builder.Objects.Add(info);
                 }
@@ -118,7 +132,7 @@ namespace Wobble.Graphics.UI.Debugging
             }
         }
 
-        private static DrawableDebugInfo CreateInfo(Drawable drawable, int drawCount)
+        private static DrawableDebugInfo CreateInfo(Drawable drawable, int drawCount, RectangleF drawRectangle)
         {
             string spriteTexture = null;
             string textPreview = null;
@@ -147,6 +161,7 @@ namespace Wobble.Graphics.UI.Debugging
                 drawable.Visible,
                 drawable.IsDisposed,
                 drawable.ScreenRectangle,
+                drawRectangle,
                 drawable.Position,
                 drawable.Size,
                 drawable.Rotation,
@@ -158,6 +173,34 @@ namespace Wobble.Graphics.UI.Debugging
                 fontSize,
                 lineCount
             );
+        }
+
+        private static RectangleF GetClippedDrawRectangle(RectangleF rectangle)
+        {
+            var left = Math.Max(0, rectangle.Left);
+            var top = Math.Max(0, rectangle.Top);
+            var right = Math.Min(WindowManager.Width, rectangle.Right);
+            var bottom = Math.Min(WindowManager.Height, rectangle.Bottom);
+
+            if (SpriteBatchOptions.ActiveClipRectangle.HasValue)
+            {
+                var clip = SpriteBatchOptions.ActiveClipRectangle.Value;
+                left = Math.Max(left, clip.Left);
+                top = Math.Max(top, clip.Top);
+                right = Math.Min(right, clip.Right);
+                bottom = Math.Min(bottom, clip.Bottom);
+            }
+
+            return new RectangleF(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
+        }
+
+        private static RectangleF Union(RectangleF first, RectangleF second)
+        {
+            var left = Math.Min(first.Left, second.Left);
+            var top = Math.Min(first.Top, second.Top);
+            var right = Math.Max(first.Right, second.Right);
+            var bottom = Math.Max(first.Bottom, second.Bottom);
+            return new RectangleF(left, top, right - left, bottom - top);
         }
 
         private static string DescribeTexture(Texture2D texture)
@@ -263,6 +306,7 @@ namespace Wobble.Graphics.UI.Debugging
         public bool Visible { get; }
         public bool IsDisposed { get; }
         public RectangleF ScreenRectangle { get; }
+        public RectangleF DrawRectangle { get; }
         public ScalableVector2 Position { get; }
         public ScalableVector2 Size { get; }
         public Microsoft.Xna.Framework.Vector2 Scale { get; }
@@ -275,9 +319,10 @@ namespace Wobble.Graphics.UI.Debugging
         public int? LineCount { get; }
 
         public DrawableDebugInfo(int id, string typeName, string parentTypeName, int drawCount, int drawOrder,
-            int childCount, bool visible, bool isDisposed, RectangleF screenRectangle, ScalableVector2 position,
-            ScalableVector2 size, float rotation, Microsoft.Xna.Framework.Vector2 scale, bool hasSpriteBatchOptions,
-            string spriteTextureDescription, string textPreview, bool? textCached, int? fontSize, int? lineCount)
+            int childCount, bool visible, bool isDisposed, RectangleF screenRectangle, RectangleF drawRectangle,
+            ScalableVector2 position, ScalableVector2 size, float rotation, Microsoft.Xna.Framework.Vector2 scale,
+            bool hasSpriteBatchOptions, string spriteTextureDescription, string textPreview, bool? textCached,
+            int? fontSize, int? lineCount)
         {
             Id = id;
             TypeName = typeName;
@@ -288,6 +333,7 @@ namespace Wobble.Graphics.UI.Debugging
             Visible = visible;
             IsDisposed = isDisposed;
             ScreenRectangle = screenRectangle;
+            DrawRectangle = drawRectangle;
             Position = position;
             Size = size;
             Rotation = rotation;

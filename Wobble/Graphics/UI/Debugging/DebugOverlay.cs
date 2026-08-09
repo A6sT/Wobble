@@ -127,7 +127,7 @@ namespace Wobble.Graphics.UI.Debugging
         private void RenderScene()
         {
             ImGui.Text($"Screen: {PerformanceStats.CurrentScreenName}");
-            ImGui.Text($"Drawables drawn: {PerformanceStats.DrawnDrawableCount}");
+            ImGui.Text($"Drawables submitted: {PerformanceStats.DrawnDrawableCount}");
             ImGui.Text($"Scheduled render targets: {PerformanceStats.ScheduledRenderTargetDrawCount}");
         }
 
@@ -240,7 +240,7 @@ namespace Wobble.Graphics.UI.Debugging
 
         private void RenderDrawableTypeGroup(DrawableTypeDebugInfo group)
         {
-            var open = ImGui.TreeNode($"{group.TypeName} drawn {group.DrawnCount} live {group.LiveCount}##drawable-type-{group.TypeName}");
+            var open = ImGui.TreeNode($"{group.TypeName} submitted {group.DrawnCount} live {group.LiveCount}##drawable-type-{group.TypeName}");
 
             if (!open)
                 return;
@@ -293,6 +293,7 @@ namespace Wobble.Graphics.UI.Debugging
             ImGui.Text($"Visible: {info.Visible}");
             ImGui.Text($"Disposed: {info.IsDisposed}");
             ImGui.Text($"Rect: {info.ScreenRectangle.X:0.0}, {info.ScreenRectangle.Y:0.0}, {info.ScreenRectangle.Width:0.0}, {info.ScreenRectangle.Height:0.0}");
+            ImGui.Text($"Draw rect: {info.DrawRectangle.X:0.0}, {info.DrawRectangle.Y:0.0}, {info.DrawRectangle.Width:0.0}, {info.DrawRectangle.Height:0.0}");
             ImGui.Text($"Position: {info.Position.X.Value:0.0}, {info.Position.Y.Value:0.0} scale {info.Position.X.Scale:0.00}, {info.Position.Y.Scale:0.00}");
             ImGui.Text($"Size: {info.Size.X.Value:0.0}, {info.Size.Y.Value:0.0} scale {info.Size.X.Scale:0.00}, {info.Size.Y.Scale:0.00}");
             ImGui.Text($"Rotation: {info.Rotation:0.00}");
@@ -331,7 +332,10 @@ namespace Wobble.Graphics.UI.Debugging
                 if (!info.IsCached && !showUncachedTextBounds)
                     continue;
 
-                var rect = info.ScreenRectangle;
+                if (!info.DrawRectangle.HasValue)
+                    continue;
+
+                var rect = info.DrawRectangle.Value;
 
                 if (rect.Width <= 0 || rect.Height <= 0)
                     continue;
@@ -367,7 +371,7 @@ namespace Wobble.Graphics.UI.Debugging
                     if (showSelectedDrawableBoundsOnly && info.Id != selectedDrawableId)
                         continue;
 
-                    var rect = info.ScreenRectangle;
+                    var rect = info.DrawRectangle;
 
                     if (rect.Width <= 0 || rect.Height <= 0)
                         continue;

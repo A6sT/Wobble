@@ -53,6 +53,10 @@ namespace Wobble.Graphics.UI.Debugging
                     if (visibleOnly && !target.Visible)
                         continue;
 
+                    RectangleF? drawRectangle = null;
+                    if (DrawableDebugRegistry.TryGetCurrentFrameDrawRectangle(target.DebugId, out var currentRectangle))
+                        drawRectangle = currentRectangle;
+
                     result.Add(new SpriteTextPlusDebugInfo(
                         entry.Id,
                         target.Text,
@@ -62,6 +66,7 @@ namespace Wobble.Graphics.UI.Debugging
                         target.MaxWidth,
                         target.Children.Count,
                         target.ScreenRectangle,
+                        drawRectangle,
                         target.Size
                     ));
                 }
@@ -108,10 +113,12 @@ namespace Wobble.Graphics.UI.Debugging
 
         public RectangleF ScreenRectangle { get; }
 
+        public RectangleF? DrawRectangle { get; }
+
         public ScalableVector2 Size { get; }
 
         public SpriteTextPlusDebugInfo(int id, string text, bool isCached, bool visible, int fontSize, float? maxWidth,
-            int lineCount, RectangleF screenRectangle, ScalableVector2 size)
+            int lineCount, RectangleF screenRectangle, RectangleF? drawRectangle, ScalableVector2 size)
         {
             Id = id;
             Text = text ?? "";
@@ -121,6 +128,7 @@ namespace Wobble.Graphics.UI.Debugging
             MaxWidth = maxWidth;
             LineCount = lineCount;
             ScreenRectangle = screenRectangle;
+            DrawRectangle = drawRectangle;
             Size = size;
         }
     }

@@ -625,7 +625,7 @@ namespace Wobble.Graphics
 
         /// <summary>
         ///     Returns whether this drawable intersects both the window and any temporary current-screen clip.
-        ///     The latter lets opaque overlays cull fully covered drawable trees before they issue draw calls.
+        ///     The latter lets opaque overlays and clipping containers cull covered drawable trees.
         /// </summary>
         protected bool ShouldDraw()
         {
@@ -637,10 +637,10 @@ namespace Wobble.Graphics
             if (!DrawIfOffScreen && !RectangleF.Intersects(ScreenMinimumBoundingRectangle, screenBounds))
                 return false;
 
-            if (!SpriteBatchOptions.ActiveScreenClipRectangle.HasValue)
+            if (!SpriteBatchOptions.ActiveClipRectangle.HasValue)
                 return true;
 
-            var clipRectangle = SpriteBatchOptions.ActiveScreenClipRectangle.Value;
+            var clipRectangle = SpriteBatchOptions.ActiveClipRectangle.Value;
             var clipBounds = new RectangleF(clipRectangle.X, clipRectangle.Y, clipRectangle.Width, clipRectangle.Height);
             return RectangleF.Intersects(ScreenMinimumBoundingRectangle, clipBounds);
         }

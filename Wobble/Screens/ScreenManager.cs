@@ -190,18 +190,18 @@ namespace Wobble.Screens
             var graphicsDevice = GameBase.Game.GraphicsDevice;
             var previousScissorRectangle = graphicsDevice.ScissorRectangle;
             var previousRasterizerState = graphicsDevice.RasterizerState;
-            var previousClipRectangle = SpriteBatchOptions.ActiveScreenClipRectangle;
+            var previousClipRectangle = SpriteBatchOptions.ActiveClipRectangle;
 
             try
             {
-                SpriteBatchOptions.ActiveScreenClipRectangle = clipRectangle;
+                SpriteBatchOptions.ActiveClipRectangle = clipRectangle;
                 CurrentScreen.Draw(gameTime);
             }
             finally
             {
                 _ = GameBase.Game.TryEndBatch();
                 GameBase.DefaultSpriteBatchInUse = false;
-                SpriteBatchOptions.ActiveScreenClipRectangle = previousClipRectangle;
+                SpriteBatchOptions.ActiveClipRectangle = previousClipRectangle;
                 graphicsDevice.ScissorRectangle = previousScissorRectangle;
                 graphicsDevice.RasterizerState = previousRasterizerState ?? RasterizerState.CullNone;
             }
