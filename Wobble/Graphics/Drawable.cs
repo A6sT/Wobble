@@ -587,10 +587,7 @@ namespace Wobble.Graphics
         /// <param name="gameTime"></param>
         public virtual void Draw(GameTime gameTime)
         {
-            if (!Visible)
-                return;
-
-            if (!RectangleF.Intersects(ScreenMinimumBoundingRectangle, new RectangleF(0, 0, WindowManager.Width, WindowManager.Height)) && !DrawIfOffScreen)
+            if (!ShouldDraw())
                 return;
 
             // Draw the children and set their order.
@@ -624,6 +621,28 @@ namespace Wobble.Graphics
             {
                 Logger.Error(e, LogType.Runtime);
             }
+        }
+
+        /// <summary>
+        ///     Returns whether this drawable intersects both the window and any temporary current-screen clip.
+        ///     The latter lets opaque overlays cull fully covered drawable trees before they issue draw calls.
+        /// </summary>
+        protected bool ShouldDraw()
+        {
+            if (!Visible)
+                return false;
+
+            var screenBounds = new RectangleF(0, 0, WindowManager.Width, WindowManager.Height);
+
+            if (!DrawIfOffScreen && !RectangleF.Intersects(ScreenMinimumBoundingRectangle, screenBounds))
+                return false;
+
+            if (!SpriteBatchOptions.ActiveScreenClipRectangle.HasValue)
+                return true;
+
+            var clipRectangle = SpriteBatchOptions.ActiveScreenClipRectangle.Value;
+            var clipBounds = new RectangleF(clipRectangle.X, clipRectangle.Y, clipRectangle.Width, clipRectangle.Height);
+            return RectangleF.Intersects(ScreenMinimumBoundingRectangle, clipBounds);
         }
 
         /// <summary>

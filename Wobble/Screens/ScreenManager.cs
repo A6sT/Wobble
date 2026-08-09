@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Wobble.Graphics;
 using Wobble.Graphics.UI.Buttons;
 
@@ -20,6 +21,12 @@ namespace Wobble.Screens
         private static Screen CurrentScreen { get; set; }
 
         public static string CurrentScreenName => CurrentScreen?.GetType().Name ?? "None";
+
+        /// <summary>
+        ///     Optional virtual-screen rectangle to draw the current screen into. Overlays drawn after the screen are
+        ///     unaffected, allowing an opaque overlay to avoid the pixel cost of rendering the area beneath it.
+        /// </summary>
+        public static Rectangle? DrawClipRectangle { get; set; }
 
         /// <summary>
         ///     The screen and retained element keys queued for the next update.
@@ -164,7 +171,41 @@ namespace Wobble.Screens
             }
         }
 
-        public static void Draw(GameTime gameTime) => CurrentScreen?.Draw(gameTime);
+        public static void Draw(GameTime gameTime)
+        {
+            if (CurrentScreen == null)
+                return;
+
+            if (!DrawClipRectangle.HasValue)
+            {
+                CurrentScreen.Draw(gameTime);
+                return;
+            }
+
+            var clipRectangle = DrawClipRectangle.Value;
+
+            if (clipRectangle.Width <= 0 || clipRectangle.Height <= 0)
+                return;
+
+            var graphicsDevice = GameBase.Game.GraphicsDevice;
+            var previousScissorRectangle = graphicsDevice.ScissorRectangle;
+            var previousRasterizerState = graphicsDevice.RasterizerState;
+            var previousClipRectangle = SpriteBatchOptions.ActiveScreenClipRectangle;
+
+            try
+            {
+                SpriteBatchOptions.ActiveScreenClipRectangle = clipRectangle;
+                CurrentScreen.Draw(gameTime);
+            }
+            finally
+            {
+                _ = GameBase.Game.TryEndBatch();
+                GameBase.DefaultSpriteBatchInUse = false;
+                SpriteBatchOptions.ActiveScreenClipRectangle = previousClipRectangle;
+                graphicsDevice.ScissorRectangle = previousScissorRectangle;
+                graphicsDevice.RasterizerState = previousRasterizerState ?? RasterizerState.CullNone;
+            }
+        }
 
         private static void SwitchScreen(Screen screen, ISet<string> retainedKeys)
         {

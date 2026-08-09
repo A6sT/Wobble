@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Wobble.Graphics.Shaders;
@@ -12,6 +13,21 @@ namespace Wobble.Graphics
     /// </summary>
     public class SpriteBatchOptions
     {
+        private static readonly RasterizerState DefaultScissorRasterizerState = new RasterizerState
+        {
+            CullMode = CullMode.None,
+            ScissorTestEnable = true
+        };
+
+        private static readonly Dictionary<RasterizerState, RasterizerState> ScissorRasterizerStates =
+            new Dictionary<RasterizerState, RasterizerState>();
+
+        /// <summary>
+        ///     Optional virtual-screen clipping rectangle applied to sprite batches while the current screen is drawn.
+        ///     Render targets are intentionally excluded because their coordinates are local to the target.
+        /// </summary>
+        internal static Rectangle? ActiveScreenClipRectangle { get; set; }
+
         public SpriteSortMode SortMode { get; set; } = SpriteSortMode.Deferred;
         public BlendState BlendState { get; set; } = BlendState.NonPremultiplied;
         public SamplerState SamplerState { get; set; } = SamplerState.LinearClamp;
@@ -47,7 +63,52 @@ namespace Wobble.Graphics
                 matrix = null;
 
             _ = GameBase.Game.TryEndBatch();
-            GameBase.Game.SpriteBatch.Begin(SortMode, BlendState, SamplerState, DepthStencilState, RasterizerState, Shader?.ShaderEffect, matrix);
+
+            var rasterizerState = RasterizerState;
+            var graphicsDevice = GameBase.Game.GraphicsDevice;
+
+            if (ActiveScreenClipRectangle.HasValue && graphicsDevice.GetRenderTargets().Length == 0)
+            {
+                var clipRectangle = ToBackBufferRectangle(ActiveScreenClipRectangle.Value);
+
+                if (graphicsDevice.RasterizerState?.ScissorTestEnable == true)
+                    clipRectangle = Rectangle.Intersect(clipRectangle, graphicsDevice.ScissorRectangle);
+
+                graphicsDevice.ScissorRectangle = Rectangle.Intersect(clipRectangle, graphicsDevice.Viewport.Bounds);
+                rasterizerState = GetScissorRasterizerState(rasterizerState);
+            }
+
+            GameBase.Game.SpriteBatch.Begin(SortMode, BlendState, SamplerState, DepthStencilState, rasterizerState, Shader?.ShaderEffect, matrix);
+        }
+
+        private static Rectangle ToBackBufferRectangle(Rectangle rectangle) => new Rectangle(
+            (int) Math.Floor(rectangle.X * WindowManager.ScreenScale.X),
+            (int) Math.Floor(rectangle.Y * WindowManager.ScreenScale.Y),
+            (int) Math.Ceiling(rectangle.Width * WindowManager.ScreenScale.X),
+            (int) Math.Ceiling(rectangle.Height * WindowManager.ScreenScale.Y));
+
+        private static RasterizerState GetScissorRasterizerState(RasterizerState rasterizerState)
+        {
+            if (rasterizerState == null)
+                return DefaultScissorRasterizerState;
+
+            if (rasterizerState.ScissorTestEnable)
+                return rasterizerState;
+
+            if (ScissorRasterizerStates.TryGetValue(rasterizerState, out var scissorRasterizerState))
+                return scissorRasterizerState;
+
+            scissorRasterizerState = new RasterizerState
+            {
+                CullMode = rasterizerState.CullMode,
+                FillMode = rasterizerState.FillMode,
+                DepthBias = rasterizerState.DepthBias,
+                MultiSampleAntiAlias = rasterizerState.MultiSampleAntiAlias,
+                ScissorTestEnable = true,
+                SlopeScaleDepthBias = rasterizerState.SlopeScaleDepthBias
+            };
+            ScissorRasterizerStates.Add(rasterizerState, scissorRasterizerState);
+            return scissorRasterizerState;
         }
     }
 }
