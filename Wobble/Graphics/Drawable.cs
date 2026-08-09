@@ -153,6 +153,8 @@ namespace Wobble.Graphics
         /// </summary>
         public RectangleF ScreenMinimumBoundingRectangle { get; private set; } = new RectangleF();
 
+        internal RectangleF DrawBounds => GetDrawBounds();
+
         /// <summary>
         ///     The total width of the drawable, considering the width scale
         /// </summary>
@@ -632,9 +634,10 @@ namespace Wobble.Graphics
             if (!Visible)
                 return false;
 
+            var drawBounds = DrawBounds;
             var screenBounds = new RectangleF(0, 0, WindowManager.Width, WindowManager.Height);
 
-            if (!DrawIfOffScreen && !RectangleF.Intersects(ScreenMinimumBoundingRectangle, screenBounds))
+            if (!DrawIfOffScreen && !RectangleF.Intersects(drawBounds, screenBounds))
                 return false;
 
             if (!SpriteBatchOptions.ActiveClipRectangle.HasValue)
@@ -642,8 +645,10 @@ namespace Wobble.Graphics
 
             var clipRectangle = SpriteBatchOptions.ActiveClipRectangle.Value;
             var clipBounds = new RectangleF(clipRectangle.X, clipRectangle.Y, clipRectangle.Width, clipRectangle.Height);
-            return RectangleF.Intersects(ScreenMinimumBoundingRectangle, clipBounds);
+            return RectangleF.Intersects(drawBounds, clipBounds);
         }
+
+        protected virtual RectangleF GetDrawBounds() => ScreenMinimumBoundingRectangle;
 
         /// <summary>
         ///     Destroys the object. Removes the parent object. Any derivates should

@@ -65,7 +65,7 @@ namespace Wobble.Graphics.UI.Debugging
         {
             CurrentFrameDrawIds.Add(drawable.DebugId);
 
-            var drawRectangle = GetClippedDrawRectangle(drawable.ScreenRectangle);
+            var drawRectangle = GetClippedDrawRectangle(drawable.DrawBounds);
             if (CurrentFrameDrawRectangles.TryGetValue(drawable.DebugId, out var previousRectangle))
                 drawRectangle = Union(previousRectangle, drawRectangle);
 
