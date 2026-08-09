@@ -330,9 +330,14 @@ namespace Wobble.Graphics.Sprites
         ///  <param name="gameTime"></param>
         public override void Draw(GameTime gameTime)
         {
-            // Get the current scissor rectangle and save it so that we can reset it back.
-            // to its original.
-            var currentRect = GameBase.Game.GraphicsDevice.ScissorRectangle;
+            var game = GameBase.Game;
+            var graphicsDevice = game.GraphicsDevice;
+
+            // Flush the parent batch before changing its scissor rectangle.
+            _ = game.TryEndBatch();
+
+            var currentRect = graphicsDevice.ScissorRectangle;
+            var currentRasterizerState = graphicsDevice.RasterizerState;
             var previousDrawClip = SpriteBatchOptions.PushClip(ScreenRectangle);
 
             try
@@ -350,17 +355,24 @@ namespace Wobble.Graphics.Sprites
                     Height = (int)(ScreenRectangle.Height * heightScale)
                 };
 
+                if (currentRasterizerState?.ScissorTestEnable == true)
+                    rect = Rectangle.Intersect(rect, currentRect);
+
                 // Set new scissor rect to the scaled rect.
-                GameBase.Game.GraphicsDevice.ScissorRectangle = rect;
+                graphicsDevice.ScissorRectangle = Rectangle.Intersect(rect, graphicsDevice.Viewport.Bounds);
 
                 // Draw sprite + children.
                 base.Draw(gameTime);
             }
             finally
             {
-                // Reset the CPU and GPU clip state back to their previous values.
+                // Flush this container before restoring the parent clip.
+                _ = game.TryEndBatch();
                 SpriteBatchOptions.RestoreClip(previousDrawClip);
-                GameBase.Game.GraphicsDevice.ScissorRectangle = currentRect;
+                graphicsDevice.ScissorRectangle = currentRect;
+
+                GameBase.DefaultSpriteBatchOptions.Begin();
+                GameBase.DefaultSpriteBatchInUse = true;
             }
         }
 
