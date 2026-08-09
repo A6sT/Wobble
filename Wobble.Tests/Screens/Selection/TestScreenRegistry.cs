@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Wobble.Screens;
 using Wobble.Tests.Screens.Tests.Audio;
 using Wobble.Tests.Screens.Tests.Background;
+using Wobble.Tests.Screens.Tests.BackgroundClipping;
 using Wobble.Tests.Screens.Tests.BlurContainer;
 using Wobble.Tests.Screens.Tests.BlurredBgImage;
 using Wobble.Tests.Screens.Tests.ButtonPerformance;
@@ -76,6 +77,7 @@ namespace Wobble.Tests.Screens.Selection
         {
             new TestScreenDescriptor(Rendering, "Screen_DrawingSprites", () => new TestDrawingSpritesScreen()),
             new TestScreenDescriptor(Rendering, "Screen_Background", () => new TestBackgroundImageScreen()),
+            new TestScreenDescriptor(Rendering, "Screen_BackgroundClipping", () => new TestBackgroundClippingScreen(), true),
             new TestScreenDescriptor(Rendering, "Screen_BlurContainer", () => new TestBlurContainerScreen()),
             new TestScreenDescriptor(Rendering, "Screen_BlurredBackgroundImage", () => new TestBlurredBackgroundImageScreen()),
             new TestScreenDescriptor(Rendering, "Screen_SpriteMaskContainer", () => new TestSpriteMaskingScreen()),
