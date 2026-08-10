@@ -307,7 +307,7 @@ namespace Wobble.Graphics.UI.Buttons
         /// <summary>
         ///     Clears transient interaction state when a parent detaches this button without destroying it.
         /// </summary>
-        internal void ResetInteractionState()
+        public void ResetInteractionState()
         {
             var wasHovered = IsHovered;
             IsHoveredWithoutDrawOrder = false;
