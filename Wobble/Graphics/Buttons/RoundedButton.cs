@@ -54,6 +54,23 @@ namespace Wobble.Graphics.Buttons
             set
             {
                 _cornerRadius = value;
+                _cornerRadii = null;
+                UpdateBackgroundTexture();
+            }
+        }
+
+        private RoundedRectCornerRadii? _cornerRadii;
+
+        /// <summary>
+        ///     Optional independent corner radii. When set, this takes precedence over
+        ///     <see cref="CornerRadius"/> while preserving the existing scalar API for all other buttons.
+        /// </summary>
+        public RoundedRectCornerRadii? CornerRadii
+        {
+            get => _cornerRadii;
+            set
+            {
+                _cornerRadii = value;
                 UpdateBackgroundTexture();
             }
         }
@@ -302,7 +319,8 @@ namespace Wobble.Graphics.Buttons
                 return;
 
             var radius = Math.Min(CornerRadius ?? Height / 2f, Math.Min(Width, Height) / 2f);
-            var texture = RoundedRectTextureCache.Get(Width, Height, radius, AntiAliasedEdges);
+            var radii = CornerRadii ?? RoundedRectCornerRadii.All(radius);
+            var texture = RoundedRectTextureCache.Get(Width, Height, radii, AntiAliasedEdges);
 
             if (Image != texture)
                 Image = texture;

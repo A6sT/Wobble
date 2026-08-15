@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -12,6 +13,11 @@ namespace Wobble.Graphics.Sprites
 {
     public class ScrollContainer : Sprite
     {
+        private static List<ScrollContainer> MouseWheelInputCapturers { get; } =
+            new List<ScrollContainer>();
+
+        private bool _capturesMouseWheelInput;
+
         /// <summary>
         ///     The content that holds and is a parent of all sprites
         /// </summary>
@@ -96,6 +102,26 @@ namespace Wobble.Graphics.Sprites
         ///     Determines if the scrolling input is enabled for the container.
         /// </summary>
         public bool InputEnabled { get; set; }
+
+        /// <summary>
+        ///     Prevents other scroll containers from handling mouse wheel input while this
+        ///     container's capture is active. This is useful for nested and overlay scroll areas.
+        /// </summary>
+        public bool CapturesMouseWheelInput
+        {
+            get => _capturesMouseWheelInput;
+            set
+            {
+                if (_capturesMouseWheelInput == value)
+                    return;
+
+                _capturesMouseWheelInput = value;
+                if (value)
+                    MouseWheelInputCapturers.Add(this);
+                else
+                    MouseWheelInputCapturers.Remove(this);
+            }
+        }
 
         /// <summary>
         ///     The minimum y the scrollbar will be clamped to
@@ -216,9 +242,10 @@ namespace Wobble.Graphics.Sprites
             // Scroll wheel scrolling
             if (InputEnabled && !IsScrollbarDragging && !IsMiddleMouseDragging)
             {
-                if (MouseManager.IsScrollingUp(InvertedScrolling))
+                var mouseWheelInputCaptured = IsMouseWheelInputCapturedByAnotherContainer();
+                if (!mouseWheelInputCaptured && MouseManager.IsScrollingUp(InvertedScrolling))
                     TargetY += ScrollSpeed;
-                else if (MouseManager.IsScrollingDown(InvertedScrolling))
+                else if (!mouseWheelInputCaptured && MouseManager.IsScrollingDown(InvertedScrolling))
                     TargetY -= ScrollSpeed;
                 else if (KeyboardManager.IsUniqueKeyPress(Keys.PageUp))
                     TargetY += ScrollSpeed * 5;
@@ -260,6 +287,27 @@ namespace Wobble.Graphics.Sprites
             base.Update(gameTime);
         }
 
+        /// <summary>
+        ///     Returns whether this container currently owns mouse wheel input. Derived overlay
+        ///     containers can evaluate their input gate here so capture does not depend on update order.
+        /// </summary>
+        protected virtual bool IsMouseWheelInputCaptureActive() =>
+            CapturesMouseWheelInput && InputEnabled && Visible && !IsDisposed && IsHovered();
+
+        private bool IsMouseWheelInputCapturedByAnotherContainer()
+        {
+            // Prefer the most recently registered active capturer. Transient overlays are
+            // typically created last, and this also keeps overlapping capturers deterministic.
+            for (var i = MouseWheelInputCapturers.Count - 1; i >= 0; i--)
+            {
+                var capturer = MouseWheelInputCapturers[i];
+                if (capturer.IsMouseWheelInputCaptureActive())
+                    return capturer != this;
+            }
+
+            return false;
+        }
+
         /// <inheritdoc />
         /// <summary>
         /// </summary>
@@ -267,6 +315,13 @@ namespace Wobble.Graphics.Sprites
         {
             ContentContainer.Destroy();
             base.Destroy();
+        }
+
+        /// <inheritdoc />
+        public override void Dispose()
+        {
+            CapturesMouseWheelInput = false;
+            base.Dispose();
         }
 
         /// <inheritdoc />

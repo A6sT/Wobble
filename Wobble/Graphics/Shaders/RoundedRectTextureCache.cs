@@ -14,29 +14,64 @@ namespace Wobble.Graphics.Shaders
     public static class RoundedRectTextureCache
     {
         private const int TextureSizeBucket = 4;
+        private const int ExactSizeThreshold = 64;
         private const int CleanupInterval = 64;
         private const float RadiusBucket = 0.125f;
 
         private static Dictionary<TextureKey, WeakReference<Texture2D>> Textures { get; } =
             new Dictionary<TextureKey, WeakReference<Texture2D>>();
 
+        private static object SyncRoot { get; } = new object();
+
         private static int TexturesCreatedSinceCleanup { get; set; }
 
         public static Texture2D Get(float width, float height, float radius, bool antiAliased = true)
         {
-            var textureWidth = BucketDimension(width);
-            var textureHeight = BucketDimension(height);
-            var scaledRadius = BucketRadius(MathHelper.Clamp(
-                radius * Math.Min(textureWidth / width, textureHeight / height),
-                0,
-                Math.Min(textureWidth, textureHeight) / 2f));
-            var key = new TextureKey(textureWidth, textureHeight, scaledRadius, antiAliased);
+            return Get(width, height, RoundedRectCornerRadii.All(radius), antiAliased);
+        }
+
+        public static Texture2D Get(float width, float height, RoundedRectCornerRadii radii,
+            bool antiAliased = true)
+        {
+            lock (SyncRoot)
+                return GetCached(width, height, radii, antiAliased);
+        }
+
+        private static Texture2D GetCached(float width, float height, RoundedRectCornerRadii radii,
+            bool antiAliased)
+        {
+            var safeWidth = NormalizeDimension(width);
+            var safeHeight = NormalizeDimension(height);
+            var normalizedRadii = new RoundedRectCornerRadii(
+                NormalizeRadius(radii.TopLeft),
+                NormalizeRadius(radii.TopRight),
+                NormalizeRadius(radii.BottomRight),
+                NormalizeRadius(radii.BottomLeft));
+            var requiresExactSize = HasAsymmetricRadii(normalizedRadii) ||
+                                    Math.Min(safeWidth, safeHeight) <= ExactSizeThreshold;
+            var textureWidth = requiresExactSize ? ExactDimension(safeWidth) : BucketDimension(safeWidth);
+            var textureHeight = requiresExactSize ? ExactDimension(safeHeight) : BucketDimension(safeHeight);
+            var dimensionScale = Math.Min(textureWidth / safeWidth, textureHeight / safeHeight);
+            var maxRadius = Math.Min(textureWidth, textureHeight) / 2f;
+            var largestRadius = Math.Max(
+                Math.Max(normalizedRadii.TopLeft, normalizedRadii.TopRight),
+                Math.Max(normalizedRadii.BottomRight, normalizedRadii.BottomLeft)) * dimensionScale;
+            var radiusScale = largestRadius > maxRadius && largestRadius > 0
+                ? maxRadius / largestRadius
+                : 1f;
+            var combinedScale = dimensionScale * radiusScale;
+            var scaledRadii = new RoundedRectCornerRadii(
+                BucketRadius(normalizedRadii.TopLeft * combinedScale),
+                BucketRadius(normalizedRadii.TopRight * combinedScale),
+                BucketRadius(normalizedRadii.BottomRight * combinedScale),
+                BucketRadius(normalizedRadii.BottomLeft * combinedScale));
+            var key = new TextureKey(textureWidth, textureHeight, scaledRadii, antiAliased);
 
             if (Textures.TryGetValue(key, out var reference) &&
                 reference.TryGetTarget(out var texture) && !texture.IsDisposed)
                 return texture;
 
-            texture = Create(textureWidth, textureHeight, scaledRadius, antiAliased);
+            texture = Create(textureWidth, textureHeight, scaledRadii, antiAliased);
             Textures[key] = new WeakReference<Texture2D>(texture);
 
             if (++TexturesCreatedSinceCleanup >= CleanupInterval)
@@ -48,9 +83,21 @@ namespace Wobble.Graphics.Shaders
             return texture;
         }
 
+        private static float NormalizeDimension(float value) =>
+            !float.IsNaN(value) && !float.IsInfinity(value) && value > 0 ? value : 1;
+
+        private static float NormalizeRadius(float value) =>
+            !float.IsNaN(value) && !float.IsInfinity(value) ? Math.Max(0, value) : 0;
+
+        private static bool HasAsymmetricRadii(RoundedRectCornerRadii radii) =>
+            !radii.TopLeft.Equals(radii.TopRight) || !radii.TopRight.Equals(radii.BottomRight) ||
+            !radii.BottomRight.Equals(radii.BottomLeft);
+
+        private static int ExactDimension(float value) => Math.Max(1, (int) Math.Ceiling(value));
+
         private static int BucketDimension(float value)
         {
-            var pixels = Math.Max(1, (int) Math.Ceiling(value));
+            var pixels = ExactDimension(value);
             return (pixels + TextureSizeBucket - 1) / TextureSizeBucket * TextureSizeBucket;
         }
 
@@ -70,7 +117,8 @@ namespace Wobble.Graphics.Shaders
                 Textures.Remove(key);
         }
 
-        private static Texture2D Create(int width, int height, float radius, bool antiAliased)
+        private static Texture2D Create(int width, int height, RoundedRectCornerRadii radii,
+            bool antiAliased)
         {
             var texture = new Texture2D(GameBase.Game.GraphicsDevice, width, height, false, SurfaceFormat.Color);
             var pixels = new Color[width * height];
@@ -81,13 +129,21 @@ namespace Wobble.Graphics.Shaders
             {
                 for (var x = 0; x < width; x++)
                 {
+                    var radius = x < halfWidth
+                        ? y < halfHeight ? radii.TopLeft : radii.BottomLeft
+                        : y < halfHeight ? radii.TopRight : radii.BottomRight;
                     var qx = Math.Abs(x + 0.5f - halfWidth) - (halfWidth - radius);
                     var qy = Math.Abs(y + 0.5f - halfHeight) - (halfHeight - radius);
                     var outsideDistance = (float) Math.Sqrt(Math.Max(qx, 0) * Math.Max(qx, 0) +
                                                             Math.Max(qy, 0) * Math.Max(qy, 0));
                     var distance = outsideDistance + Math.Min(Math.Max(qx, qy), 0) - radius;
 
-                    var coverage = antiAliased ? 1 - SmoothStep(-1, 0, distance) : distance < 0 ? 1 : 0;
+                    // Keep the AA transition centered on the mathematical edge. An entirely inward
+                    // feather noticeably shrinks radii such as 3px and 6px, especially when different
+                    // corners use different values.
+                    var coverage = antiAliased
+                        ? 1 - SmoothStep(-0.5f, 0.5f, distance)
+                        : distance <= 0 ? 1 : 0;
                     pixels[y * width + x] = new Color((byte) 255, (byte) 255, (byte) 255, (byte) (coverage * 255));
                 }
             }
@@ -108,20 +164,20 @@ namespace Wobble.Graphics.Shaders
 
             private int Height { get; }
 
-            private int RadiusBits { get; }
+            private RoundedRectCornerRadii Radii { get; }
 
             private bool AntiAliased { get; }
 
-            public TextureKey(int width, int height, float radius, bool antiAliased)
+            public TextureKey(int width, int height, RoundedRectCornerRadii radii, bool antiAliased)
             {
                 Width = width;
                 Height = height;
-                RadiusBits = BitConverter.SingleToInt32Bits(radius);
+                Radii = radii;
                 AntiAliased = antiAliased;
             }
 
             public bool Equals(TextureKey other) =>
-                Width == other.Width && Height == other.Height && RadiusBits == other.RadiusBits &&
+                Width == other.Width && Height == other.Height && Radii.Equals(other.Radii) &&
                 AntiAliased == other.AntiAliased;
 
             public override bool Equals(object obj) => obj is TextureKey other && Equals(other);
@@ -132,8 +188,8 @@ namespace Wobble.Graphics.Shaders
                 {
                     var hashCode = Width;
                     hashCode = (hashCode * 397) ^ Height;
-                    hashCode = (hashCode * 397) ^ RadiusBits;
-                    return (hashCode * 397) ^ AntiAliased.GetHashCode();
+                    hashCode = (hashCode * 397) ^ Radii.GetHashCode();
+                    return ((hashCode * 397) ^ AntiAliased.GetHashCode()) & int.MaxValue;
                 }
             }
         }
