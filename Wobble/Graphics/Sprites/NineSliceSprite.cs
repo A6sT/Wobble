@@ -120,12 +120,12 @@ namespace Wobble.Graphics.Sprites
             if (Image == null || Image.IsDisposed)
                 return;
 
-            var left = Math.Min(Math.Max(0, _margins.Left), Image.Width);
-            var right = Math.Min(Math.Max(0, _margins.Right), Image.Width - left);
-            var centerWidth = Image.Width - left - right;
-            var top = Math.Min(Math.Max(0, _margins.Top), Image.Height);
-            var bottom = Math.Min(Math.Max(0, _margins.Bottom), Image.Height - top);
-            var centerHeight = Image.Height - top - bottom;
+            var left = Math.Min(Math.Max(0, _margins.Left), ImageWidth);
+            var right = Math.Min(Math.Max(0, _margins.Right), ImageWidth - left);
+            var centerWidth = ImageWidth - left - right;
+            var top = Math.Min(Math.Max(0, _margins.Top), ImageHeight);
+            var bottom = Math.Min(Math.Max(0, _margins.Bottom), ImageHeight - top);
+            var centerHeight = ImageHeight - top - bottom;
 
             _srcTopLeft = new Rectangle(0, 0, left, top);
             _srcTopCenter = new Rectangle(left, 0, centerWidth, top);

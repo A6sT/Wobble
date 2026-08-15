@@ -26,10 +26,13 @@ namespace Wobble.Graphics.Sprites
                 _image = value;
                 _sourceRectangle = null;
 
-                Origin = new Vector2(Image.Width * Pivot.X, Image.Height * Pivot.Y);
+                Origin = new Vector2(ImageWidth * Pivot.X, Image.Height * Pivot.Y);
                 RecalculateRectangles();
             }
         }
+
+        public int ImageWidth => SourceRectangle?.Width ?? Image.Width;
+        public int ImageHeight => SourceRectangle?.Height ?? Image.Height;
 
         private Rectangle? _sourceRectangle;
 
