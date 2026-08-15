@@ -615,8 +615,11 @@ namespace Wobble.Graphics.UI.Navigation
             if (localBounds.Width <= 0 || localBounds.Height <= 0 || Width == 0 || Height == 0)
                 return;
 
-            var sourceWidth = source?.Width ?? ImageWidth;
-            var sourceHeight = source?.Height ?? ImageHeight;
+            var sourceRectangle = source ?? new Rectangle(0, 0, ImageWidth, ImageHeight);
+            sourceRectangle.Offset(ImageOffsetX, ImageOffsetY);
+
+            var sourceWidth = sourceRectangle.Width;
+            var sourceHeight = sourceRectangle.Height;
             var pivotPosition = new Vector2(Width * Pivot.X, Height * Pivot.Y);
             var origin = new Vector2(
                 sourceWidth * (pivotPosition.X - localBounds.X) / localBounds.Width,
@@ -625,7 +628,7 @@ namespace Wobble.Graphics.UI.Navigation
                 new Size2(localBounds.Width * RenderRectangle.Width / Width,
                     localBounds.Height * RenderRectangle.Height / Height));
 
-            GameBase.Game.SpriteBatch.Draw(Image, destination, source, _color, SpriteOverallRotation, origin,
+            GameBase.Game.SpriteBatch.Draw(Image, destination, sourceRectangle, _color, SpriteOverallRotation, origin,
                 SpriteEffect, 0f);
         }
 
