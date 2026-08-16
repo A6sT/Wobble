@@ -103,7 +103,7 @@ namespace Wobble.Tests.Screens.Tests.SpriteTextPlusFormattable
 
             const string markup =
                 "Mixed-size [u]#2FC6EF[[size=27]wrapping[/size]][/u] keeps every glyph inside this box. " +
-                "Hover and click [**#FFAE42[[size=32]LARGE LINK[/size]]**](large-link) to verify its effect and hit area.";
+                "Hover [DEFAULT LINK](default-link) and [**#FFAE42[[size=32]CUSTOM LINK[/size]]**](custom-link) to compare link colors.";
             var wrapped = new FormattableText(font, boldFont, markup, 18)
             {
                 Parent = panel,
@@ -111,7 +111,8 @@ namespace Wobble.Tests.Screens.Tests.SpriteTextPlusFormattable
                 X = 30,
                 Y = 82,
                 MaxWidth = 340,
-                Tint = Color.White
+                Tint = Color.White,
+                LinkColor = AccentColor
             };
 
             AddOutline(panel, 30, 82, 340, wrapped.Height, AccentColor);
@@ -201,10 +202,15 @@ namespace Wobble.Tests.Screens.Tests.SpriteTextPlusFormattable
             const string escapedMarkup =
                 @"Escaped \**plain\**, \#FFAE42[color], and \[size=40\]literal\[/size\]";
             const string malformedMarkup = "Old [color=#FFAE42]color[/color], broken [size=30]size, and **bold";
+            const string fallbackLinkMarkup =
+                "Empty [](https://example.com) and image ![preview](https://example.com/image.png)";
+            const string fallbackLinkText =
+                "Empty https://example.com and image https://example.com/image.png";
             var rangeStart = value.IndexOf("LARGE", StringComparison.Ordinal);
             var parsed = new FormattableText(font, boldFont, styledMarkup, 20);
             var escaped = new FormattableText(font, boldFont, escapedMarkup, 20);
             var malformed = new FormattableText(font, boldFont, malformedMarkup, 20);
+            var fallbackLinks = new FormattableText(font, boldFont, fallbackLinkMarkup, 20);
             var changing = new FormattableText(font, boldFont, value, 20);
             var cached = new FormattableText(font, boldFont, styledMarkup, 20, true);
             var uncached = new FormattableText(font, boldFont, styledMarkup, 20, false);
@@ -244,7 +250,9 @@ namespace Wobble.Tests.Screens.Tests.SpriteTextPlusFormattable
 
                 return new List<LayoutCheck>
                 {
-                    new LayoutCheck("Markup renders only its plain text", parsed.Text == "Default LARGE [key], then link default" && parsed.MarkupText == styledMarkup),
+                    new LayoutCheck("Markup and link fallbacks render expected text",
+                        parsed.Text == "Default LARGE [key], then link default" &&
+                        parsed.MarkupText == styledMarkup && fallbackLinks.Text == fallbackLinkText),
                     new LayoutCheck("Escaped markers remain literal", escaped.Text == "Escaped **plain**, #FFAE42[color], and [size=40]literal[/size]"),
                     new LayoutCheck("Old and malformed markup remain literal", malformed.Text == malformedMarkup),
                     new LayoutCheck("Markup mutation updates and restores bounds", largeRangeGrowsBounds && resettingMarkupRestoresBounds),
@@ -260,6 +268,7 @@ namespace Wobble.Tests.Screens.Tests.SpriteTextPlusFormattable
                 parsed.Destroy();
                 escaped.Destroy();
                 malformed.Destroy();
+                fallbackLinks.Destroy();
                 changing.Destroy();
                 cached.Destroy();
                 uncached.Destroy();

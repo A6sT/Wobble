@@ -36,6 +36,11 @@ namespace Wobble.Graphics.Sprites.Text
         private readonly List<TextColorRange> _textColorRanges = new List<TextColorRange>();
 
         /// <summary>
+        ///     Link colors followed by parsed and programmatic colors in precedence order.
+        /// </summary>
+        private readonly List<TextColorRange> _effectiveTextColorRanges = new List<TextColorRange>();
+
+        /// <summary>
         ///     Whether the final color range is a temporary overlay over the parsed and programmatic ranges.
         /// </summary>
         private bool _hasTextColorOverlayRange;
@@ -121,6 +126,26 @@ namespace Wobble.Graphics.Sprites.Text
             }
         }
 
+        /// <summary>
+        ///     Default color applied to linked character ranges. Explicit color ranges take precedence.
+        ///     Null preserves the surrounding text color.
+        /// </summary>
+        private Color? _linkColor;
+        public Color? LinkColor
+        {
+            get => _linkColor;
+            set
+            {
+                if (_linkColor == value)
+                    return;
+
+                _linkColor = value;
+                RefreshEffectiveTextColorRanges();
+                ApplyTextColorRanges();
+                ApplyTextUnderlineRanges();
+            }
+        }
+
         /// <inheritdoc />
         public override WobbleFontStore Font
         {
@@ -194,6 +219,7 @@ namespace Wobble.Graphics.Sprites.Text
             _textUnderlineRanges.AddRange(parsed.UnderlineRanges);
             _textLinkRanges.Clear();
             _textLinkRanges.AddRange(parsed.LinkRanges);
+            RefreshEffectiveTextColorRanges();
 
             var plainText = parsed.Text.ToString();
 
@@ -226,6 +252,7 @@ namespace Wobble.Graphics.Sprites.Text
             if (length != 0)
                 _textColorRanges.Add(new TextColorRange(startIndex, length, color));
 
+            RefreshEffectiveTextColorRanges();
             ApplyTextColorRanges();
         }
 
@@ -260,6 +287,7 @@ namespace Wobble.Graphics.Sprites.Text
                     _textColorRanges.Add(ranges[i]);
             }
 
+            RefreshEffectiveTextColorRanges();
             ApplyTextColorRanges();
         }
 
@@ -273,6 +301,7 @@ namespace Wobble.Graphics.Sprites.Text
 
             _hasTextColorOverlayRange = false;
             _textColorRanges.Clear();
+            RefreshEffectiveTextColorRanges();
             ApplyTextColorRanges();
         }
 
@@ -299,6 +328,7 @@ namespace Wobble.Graphics.Sprites.Text
                 _hasTextColorOverlayRange = true;
             }
 
+            RefreshEffectiveTextColorRanges();
             ApplyTextColorRanges();
         }
 
@@ -310,6 +340,7 @@ namespace Wobble.Graphics.Sprites.Text
             if (!RemoveTextColorOverlayRange())
                 return;
 
+            RefreshEffectiveTextColorRanges();
             ApplyTextColorRanges();
         }
 
@@ -328,6 +359,26 @@ namespace Wobble.Graphics.Sprites.Text
                 _textColorRanges.RemoveAt(_textColorRanges.Count - 1);
 
             return true;
+        }
+
+        /// <summary>
+        ///     Rebuilds color ranges with link colors first so explicit colors can override them.
+        /// </summary>
+        private void RefreshEffectiveTextColorRanges()
+        {
+            _effectiveTextColorRanges.Clear();
+
+            if (_linkColor.HasValue)
+            {
+                for (var i = 0; i < _textLinkRanges.Count; i++)
+                {
+                    var link = _textLinkRanges[i];
+                    _effectiveTextColorRanges.Add(new TextColorRange(link.StartIndex, link.Length,
+                        _linkColor.Value));
+                }
+            }
+
+            _effectiveTextColorRanges.AddRange(_textColorRanges);
         }
 
         /// <summary>
@@ -508,6 +559,8 @@ namespace Wobble.Graphics.Sprites.Text
             if (length != 0)
                 _textLinkRanges.Add(range);
 
+            RefreshEffectiveTextColorRanges();
+            ApplyTextColorRanges();
             RebuildTextLinkButtons();
         }
 
@@ -544,6 +597,8 @@ namespace Wobble.Graphics.Sprites.Text
                     _textLinkRanges.Add(ranges[i]);
             }
 
+            RefreshEffectiveTextColorRanges();
+            ApplyTextColorRanges();
             RebuildTextLinkButtons();
         }
 
@@ -556,6 +611,8 @@ namespace Wobble.Graphics.Sprites.Text
                 return;
 
             _textLinkRanges.Clear();
+            RefreshEffectiveTextColorRanges();
+            ApplyTextColorRanges();
             RebuildTextLinkButtons();
         }
 
@@ -770,7 +827,7 @@ namespace Wobble.Graphics.Sprites.Text
                 return;
 
             var lines = GetDisplayedLines();
-            var lineRanges = new List<TextColorRange>(_textColorRanges.Count);
+            var lineRanges = new List<TextColorRange>(_effectiveTextColorRanges.Count);
             var lineIndex = 0;
 
             for (var i = 0; i < Children.Count; i++)
@@ -778,7 +835,7 @@ namespace Wobble.Graphics.Sprites.Text
                 if (!(Children[i] is SpriteTextPlusLine lineSprite))
                     continue;
 
-                if (_textColorRanges.Count == 0 || lineIndex >= lines.Count)
+                if (_effectiveTextColorRanges.Count == 0 || lineIndex >= lines.Count)
                 {
                     lineSprite.ClearTextColorRanges();
                     lineIndex++;
@@ -788,9 +845,9 @@ namespace Wobble.Graphics.Sprites.Text
                 var line = lines[lineIndex++];
                 lineRanges.Clear();
 
-                for (var rangeIndex = 0; rangeIndex < _textColorRanges.Count; rangeIndex++)
+                for (var rangeIndex = 0; rangeIndex < _effectiveTextColorRanges.Count; rangeIndex++)
                 {
-                    var range = _textColorRanges[rangeIndex];
+                    var range = _effectiveTextColorRanges[rangeIndex];
                     var rangeStart = Math.Max(range.StartIndex, line.Start);
                     var rangeEnd = Math.Min(range.StartIndex + range.Length, line.End);
 
@@ -934,6 +991,7 @@ namespace Wobble.Graphics.Sprites.Text
                     Alignment = Alignment.TopLeft,
                     Position = new ScalableVector2(lineX + startX, lineY),
                     Size = new ScalableVector2(endX - startX, lineHeight),
+                    Depth = -1,
                     IsInteractionEnabled = IsVisibleInHierarchy()
                 };
 
@@ -1140,11 +1198,12 @@ namespace Wobble.Graphics.Sprites.Text
             if (IsCached || !Visible)
                 return;
 
-            if (_textColorRanges.Count == 0)
+            if (_effectiveTextColorRanges.Count == 0)
                 base.DrawToSpriteBatch();
             else
             {
-                var colors = SpriteTextPlusLine.CreateGlyphColors(Font, FontSize, Text, _textColorRanges);
+                var colors = SpriteTextPlusLine.CreateGlyphColors(Font, FontSize, Text,
+                    _effectiveTextColorRanges);
 
                 if (colors == null)
                     base.DrawToSpriteBatch();
@@ -1196,11 +1255,11 @@ namespace Wobble.Graphics.Sprites.Text
         /// </summary>
         private List<TextColorRange> GetLineColorRanges(WrappedTextLine line)
         {
-            var result = new List<TextColorRange>(_textColorRanges.Count);
+            var result = new List<TextColorRange>(_effectiveTextColorRanges.Count);
 
-            for (var i = 0; i < _textColorRanges.Count; i++)
+            for (var i = 0; i < _effectiveTextColorRanges.Count; i++)
             {
-                var range = _textColorRanges[i];
+                var range = _effectiveTextColorRanges[i];
                 var start = Math.Max(range.StartIndex, line.Start);
                 var end = Math.Min(range.StartIndex + range.Length, line.End);
 

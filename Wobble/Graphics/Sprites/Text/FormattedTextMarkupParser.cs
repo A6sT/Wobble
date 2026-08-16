@@ -76,14 +76,29 @@ namespace Wobble.Graphics.Sprites.Text
                     continue;
                 }
 
+                if (source[index] == '!' && index + 1 < end && source[index + 1] == '[' &&
+                    TryReadLink(source, index + 1, end, out var imageLink))
+                {
+                    AppendLinkTarget(result, imageLink.Target);
+                    index = imageLink.EndIndex;
+                    continue;
+                }
+
                 if (source[index] == '[' && TryReadLink(source, index, end, out var link))
                 {
                     var outputStart = result.Text.Length;
+                    var target = UnescapeLinkTarget(link.Target);
                     ParseRange(source, link.LabelStart, link.LabelEnd, result);
                     var length = result.Text.Length - outputStart;
 
+                    if (length == 0)
+                    {
+                        result.Text.Append(target);
+                        length = target.Length;
+                    }
+
                     if (length != 0)
-                        result.LinkRanges.Add(new TextLinkRange(outputStart, length, UnescapeLinkTarget(link.Target)));
+                        result.LinkRanges.Add(new TextLinkRange(outputStart, length, target));
 
                     index = link.EndIndex;
                     continue;
@@ -92,6 +107,18 @@ namespace Wobble.Graphics.Sprites.Text
                 result.Text.Append(source[index]);
                 index++;
             }
+        }
+
+        private static void AppendLinkTarget(FormattedTextMarkupResult result, string target)
+        {
+            target = UnescapeLinkTarget(target);
+
+            if (target.Length == 0)
+                return;
+
+            var outputStart = result.Text.Length;
+            result.Text.Append(target);
+            result.LinkRanges.Add(new TextLinkRange(outputStart, target.Length, target));
         }
 
         private static int GetStyleRangeCount(FormattedTextMarkupResult result, MarkupStyleKind kind)
