@@ -929,6 +929,15 @@ namespace Wobble.Graphics
         }
 
         /// <summary>
+        ///     Removes only animations targeting the given property leaving animations of other properties running.
+        /// </summary>
+        public void ClearAnimations(AnimationProperty property)
+        {
+            lock (Animations)
+                Animations.RemoveAll(animation => animation.Properties == property);
+        }
+
+        /// <summary>
         ///     Returns if the Drawable is currently hovered
         /// </summary>
         /// <returns></returns>
