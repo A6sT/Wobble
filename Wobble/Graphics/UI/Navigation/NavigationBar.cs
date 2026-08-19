@@ -561,18 +561,18 @@ namespace Wobble.Graphics.UI.Navigation
                 return;
 
             var barAspect = Width / Height;
-            var imageAspect = Image.Width / (float) Image.Height;
+            var imageAspect = ImageWidth / (float) ImageHeight;
             Rectangle source;
 
             if (imageAspect > barAspect)
             {
-                var sourceWidth = Math.Max(1, Math.Min(Image.Width, (int) Math.Round(Image.Height * barAspect)));
-                source = new Rectangle((Image.Width - sourceWidth) / 2, 0, sourceWidth, Image.Height);
+                var sourceWidth = Math.Max(1, Math.Min(ImageWidth, (int) Math.Round(ImageHeight * barAspect)));
+                source = new Rectangle((ImageWidth - sourceWidth) / 2, 0, sourceWidth, ImageHeight);
             }
             else
             {
-                var sourceHeight = Math.Max(1, Math.Min(Image.Height, (int) Math.Round(Image.Width / barAspect)));
-                source = new Rectangle(0, (Image.Height - sourceHeight) / 2, Image.Width, sourceHeight);
+                var sourceHeight = Math.Max(1, Math.Min(ImageHeight, (int) Math.Round(ImageWidth / barAspect)));
+                source = new Rectangle(0, (ImageHeight - sourceHeight) / 2, ImageWidth, sourceHeight);
             }
 
             DrawImageRegion(new RectangleF(0, 0, Width, Height), source);
@@ -583,9 +583,9 @@ namespace Wobble.Graphics.UI.Navigation
             if (Width <= 0 || Height <= 0)
                 return;
 
-            var scale = Math.Min(Width / Image.Width, Height / Image.Height);
-            var imageWidth = Image.Width * scale;
-            var imageHeight = Image.Height * scale;
+            var scale = Math.Min(Width / ImageWidth, Height / ImageHeight);
+            var imageWidth = ImageWidth * scale;
+            var imageHeight = ImageHeight * scale;
             DrawImageRegion(new RectangleF((Width - imageWidth) / 2f, (Height - imageHeight) / 2f,
                 imageWidth, imageHeight), null);
         }
@@ -595,15 +595,15 @@ namespace Wobble.Graphics.UI.Navigation
             if (Width <= 0 || Height <= 0)
                 return;
 
-            for (var y = 0f; y < Height; y += Image.Height)
+            for (var y = 0f; y < Height; y += ImageHeight)
             {
-                var tileHeight = Math.Min(Image.Height, Height - y);
-                var sourceHeight = Math.Max(1, Math.Min(Image.Height, (int) Math.Ceiling(tileHeight)));
+                var tileHeight = Math.Min(ImageHeight, Height - y);
+                var sourceHeight = Math.Max(1, Math.Min(ImageHeight, (int) Math.Ceiling(tileHeight)));
 
-                for (var x = 0f; x < Width; x += Image.Width)
+                for (var x = 0f; x < Width; x += ImageWidth)
                 {
-                    var tileWidth = Math.Min(Image.Width, Width - x);
-                    var sourceWidth = Math.Max(1, Math.Min(Image.Width, (int) Math.Ceiling(tileWidth)));
+                    var tileWidth = Math.Min(ImageWidth, Width - x);
+                    var sourceWidth = Math.Max(1, Math.Min(ImageWidth, (int) Math.Ceiling(tileWidth)));
                     DrawImageRegion(new RectangleF(x, y, tileWidth, tileHeight),
                         new Rectangle(0, 0, sourceWidth, sourceHeight));
                 }
@@ -615,8 +615,11 @@ namespace Wobble.Graphics.UI.Navigation
             if (localBounds.Width <= 0 || localBounds.Height <= 0 || Width == 0 || Height == 0)
                 return;
 
-            var sourceWidth = source?.Width ?? Image.Width;
-            var sourceHeight = source?.Height ?? Image.Height;
+            var sourceRectangle = source ?? new Rectangle(0, 0, ImageWidth, ImageHeight);
+            sourceRectangle.Offset(ImageOffsetX, ImageOffsetY);
+
+            var sourceWidth = sourceRectangle.Width;
+            var sourceHeight = sourceRectangle.Height;
             var pivotPosition = new Vector2(Width * Pivot.X, Height * Pivot.Y);
             var origin = new Vector2(
                 sourceWidth * (pivotPosition.X - localBounds.X) / localBounds.Width,
@@ -625,7 +628,7 @@ namespace Wobble.Graphics.UI.Navigation
                 new Size2(localBounds.Width * RenderRectangle.Width / Width,
                     localBounds.Height * RenderRectangle.Height / Height));
 
-            GameBase.Game.SpriteBatch.Draw(Image, destination, source, _color, SpriteOverallRotation, origin,
+            GameBase.Game.SpriteBatch.Draw(Image, destination, sourceRectangle, _color, SpriteOverallRotation, origin,
                 SpriteEffect, 0f);
         }
 
