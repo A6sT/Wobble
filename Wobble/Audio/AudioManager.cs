@@ -107,9 +107,25 @@ namespace Wobble.Audio
                 }
             }
 
-            Bass.Free();
+            FreeAllInitializedDevices();
             OutputLatency = 0;
             MinimumBufferLength = 0;
+        }
+
+        /// <summary>
+        ///     Frees every initialized BASS device, not just the current one, so a leftover device from the
+        ///     lost-device fallback can't block re-initializing it later.
+        /// </summary>
+        private static void FreeAllInitializedDevices()
+        {
+            for (var i = 0; i < Bass.DeviceCount; i++)
+            {
+                if (!Bass.GetDeviceInfo(i).IsInitialized)
+                    continue;
+
+                Bass.CurrentDevice = i;
+                Bass.Free();
+            }
         }
 
         /// <summary>
