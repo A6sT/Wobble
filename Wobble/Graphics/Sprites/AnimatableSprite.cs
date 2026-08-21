@@ -82,7 +82,7 @@ namespace Wobble.Graphics.Sprites
         public AnimatableSprite(List<Texture2D> frames) : this(frames.Select(f =>
             new TextureRegion(f, f.Bounds)).ToList())
         {
-            
+
         }
 
         /// <inheritdoc />
@@ -181,12 +181,6 @@ namespace Wobble.Graphics.Sprites
         ///     To stop the animation frame loop.
         /// </summary>
         public void StopLoop() => IsLooping = false;
-
-        /// <summary>
-        ///    Replaces all the frames with full-texture regions.
-        /// </summary>
-        /// <param name="newFrames"></param>
-        public void ReplaceFrames(List<Texture2D> newFrames) => ReplaceFrames(newFrames.Select(TextureRegion.From).ToList());
 
         /// <summary>
         ///    Replaces all the frames with some new ones.
