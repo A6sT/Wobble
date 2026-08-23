@@ -197,6 +197,20 @@ namespace Wobble.Graphics.Sprites
         }
 
         /// <summary>
+        ///    Replaces all the frames with some new ones.
+        /// </summary>
+        /// <param name="newFrames"></param>
+        /// <exception cref="ArgumentException"></exception>
+        public void ReplaceFrames(List<Texture2D> newFrames)
+        {
+            if (newFrames.Count == 0)
+                throw new ArgumentException("The new frames added must be greater than 0.");
+
+            Frames = newFrames.Select(f => new TextureRegion(f, f.Bounds)).ToList();
+            ChangeTo(0);
+        }
+
+        /// <summary>
         ///     Handles the looping of the animation frames.
         /// </summary>
         /// <param name="gameTime"></param>
