@@ -32,5 +32,10 @@ namespace Wobble.Graphics.Sprites
             Texture = texture;
             SourceRectangle = sourceRectangle;
         }
+
+        public static TextureRegion From(Texture2D texture2D) =>
+            new TextureRegion(texture2D, texture2D.Bounds);
+
+        public static implicit operator TextureRegion(Texture2D texture2D) => From(texture2D);
     }
 }

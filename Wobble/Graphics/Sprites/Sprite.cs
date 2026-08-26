@@ -26,10 +26,28 @@ namespace Wobble.Graphics.Sprites
                 _image = value;
                 _sourceRectangle = null;
 
-                Origin = new Vector2(Image.Width * Pivot.X, Image.Height * Pivot.Y);
+                Origin = new Vector2(ImageWidth * Pivot.X, Image.Height * Pivot.Y);
                 RecalculateRectangles();
             }
         }
+
+        /// <summary>
+        ///     The width of the region in the source image used by this sprite
+        /// </summary>
+        public int ImageWidth => SourceRectangle?.Width ?? Image.Width;
+        /// <summary>
+        ///     The height of the region in the source image used by this sprite
+        /// </summary>
+        public int ImageHeight => SourceRectangle?.Height ?? Image.Height;
+
+        /// <summary>
+        ///     The X offset of the region in the source image used by this sprite
+        /// </summary>
+        public int ImageOffsetX => SourceRectangle?.X ?? 0;
+        /// <summary>
+        ///     The Y offset of the region in the source image used by this sprite
+        /// </summary>
+        public int ImageOffsetY => SourceRectangle?.Y ?? 0;
 
         private Rectangle? _sourceRectangle;
 
