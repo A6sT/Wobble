@@ -7,19 +7,21 @@ using Microsoft.Xna.Framework;
 namespace Wobble.Graphics.Sprites.Text
 {
     /// <summary>
-    ///     Parses the lightweight markup accepted by <see cref="SpriteTextPlusFormattable"/>.
+    ///     Parses the BBCode accepted by <see cref="SpriteTextPlusFormattable"/>.
+    ///     Unknown tags are removed while their contents remain visible as plain text.
     /// </summary>
     internal static class FormattedTextMarkupParser
     {
         public static FormattedTextMarkupResult Parse(string markup)
         {
-            markup = markup ?? string.Empty;
+            markup = (markup ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
             var result = new FormattedTextMarkupResult();
             ParseRange(markup, 0, markup.Length, result);
             return result;
         }
 
-        private static void ParseRange(string source, int start, int end, FormattedTextMarkupResult result)
+        private static void ParseRange(string source, int start, int end,
+            FormattedTextMarkupResult result)
         {
             var index = start;
 
@@ -32,181 +34,282 @@ namespace Wobble.Graphics.Sprites.Text
                     continue;
                 }
 
-                if (StartsWith(source, index, end, "**") &&
-                    TryFindUnescaped(source, "**", index + 2, end, out var boldEnd))
+                if (source[index] != '[' || !TryReadTag(source, index, end, out var tag))
                 {
-                    var outputStart = result.Text.Length;
-                    var insertionIndex = result.BoldRanges.Count;
-                    ParseRange(source, index + 2, boldEnd, result);
-                    var length = result.Text.Length - outputStart;
-
-                    if (length != 0)
-                        result.BoldRanges.Insert(insertionIndex, new TextBoldRange(outputStart, length));
-
-                    index = boldEnd + 2;
+                    result.Text.Append(source[index]);
+                    index++;
                     continue;
                 }
 
-                if (source[index] == '#' && TryReadColor(source, index, end, out var color))
+                if (tag.IsClosing || tag.Kind == BbCodeKind.Unknown)
                 {
-                    var outputStart = result.Text.Length;
-                    var insertionIndex = result.ColorRanges.Count;
-                    ParseRange(source, color.ContentStart, color.ContentEnd, result);
-                    var length = result.Text.Length - outputStart;
-
-                    if (length != 0)
-                        result.ColorRanges.Insert(insertionIndex, new TextColorRange(outputStart, length, color.Color));
-
-                    index = color.EndIndex;
+                    index = tag.EndIndex;
                     continue;
                 }
 
-                if (source[index] == '[' && TryReadOpeningStyleTag(source, index, end, out var styleTag) &&
-                    TryFindClosingStyleTag(source, styleTag.EndIndex, end, styleTag.Kind, out var closingStart, out var closingEnd))
+                if (TryApplyStandaloneTag(tag, result))
                 {
-                    var outputStart = result.Text.Length;
-                    var insertionIndex = GetStyleRangeCount(result, styleTag.Kind);
-                    ParseRange(source, styleTag.EndIndex, closingStart, result);
-                    var length = result.Text.Length - outputStart;
-
-                    if (length != 0)
-                        InsertStyleRange(result, styleTag, insertionIndex, outputStart, length);
-
-                    index = closingEnd;
+                    index = tag.EndIndex;
                     continue;
                 }
 
-                if (source[index] == '!' && index + 1 < end && source[index + 1] == '[' &&
-                    TryReadLink(source, index + 1, end, out var imageLink))
+                if (!TryFindClosingTag(source, tag.EndIndex, end, tag.CanonicalName,
+                        out var closingStart, out var closingEnd))
                 {
-                    AppendLinkTarget(result, imageLink.Target);
-                    index = imageLink.EndIndex;
+                    index = tag.EndIndex;
                     continue;
                 }
 
-                if (source[index] == '[' && TryReadLink(source, index, end, out var link))
-                {
-                    var outputStart = result.Text.Length;
-                    var target = UnescapeLinkTarget(link.Target);
-                    ParseRange(source, link.LabelStart, link.LabelEnd, result);
-                    var length = result.Text.Length - outputStart;
-
-                    if (length == 0)
-                    {
-                        result.Text.Append(target);
-                        length = target.Length;
-                    }
-
-                    if (length != 0)
-                        result.LinkRanges.Add(new TextLinkRange(outputStart, length, target));
-
-                    index = link.EndIndex;
-                    continue;
-                }
-
-                result.Text.Append(source[index]);
-                index++;
+                ApplyContainerTag(source, tag, closingStart, result);
+                index = closingEnd;
             }
         }
 
-        private static void AppendLinkTarget(FormattedTextMarkupResult result, string target)
+        private static bool TryApplyStandaloneTag(BbCodeTag tag,
+            FormattedTextMarkupResult result)
         {
-            target = UnescapeLinkTarget(target);
+            switch (tag.Kind)
+            {
+                case BbCodeKind.LineBreak:
+                    result.Text.Append('\n');
+                    return true;
+                case BbCodeKind.HorizontalRule:
+                    result.Text.Append("────────");
+                    return true;
+                case BbCodeKind.ListMarker:
+                    result.Text.Append("• ");
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static void ApplyContainerTag(string source, BbCodeTag tag, int contentEnd,
+            FormattedTextMarkupResult result)
+        {
+            var outputStart = result.Text.Length;
+
+            switch (tag.Kind)
+            {
+                case BbCodeKind.Bold:
+                {
+                    var insertionIndex = result.BoldRanges.Count;
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    AddBoldRange(result, insertionIndex, outputStart);
+                    break;
+                }
+                case BbCodeKind.Italic:
+                {
+                    var insertionIndex = result.ItalicRanges.Count;
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    AddItalicRange(result, insertionIndex, outputStart);
+                    break;
+                }
+                case BbCodeKind.Underline:
+                {
+                    var insertionIndex = result.UnderlineRanges.Count;
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    AddUnderlineRange(result, insertionIndex, outputStart);
+                    break;
+                }
+                case BbCodeKind.Color:
+                {
+                    var insertionIndex = result.ColorRanges.Count;
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+
+                    if (TryParseHexColor(tag.Value, out var color))
+                    {
+                        var length = result.Text.Length - outputStart;
+
+                        if (length != 0)
+                            result.ColorRanges.Insert(insertionIndex,
+                                new TextColorRange(outputStart, length, color));
+                    }
+
+                    break;
+                }
+                case BbCodeKind.Size:
+                {
+                    var insertionIndex = result.FontSizeRanges.Count;
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+
+                    if (TryParseFontSize(tag.Value, out var fontSize))
+                    {
+                        var length = result.Text.Length - outputStart;
+
+                        if (length != 0)
+                            result.FontSizeRanges.Insert(insertionIndex,
+                                new MarkupFontSizeRange(outputStart, length, fontSize));
+                    }
+
+                    break;
+                }
+                case BbCodeKind.Heading:
+                {
+                    var boldInsertionIndex = result.BoldRanges.Count;
+                    var fontSizeInsertionIndex = result.FontSizeRanges.Count;
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    var length = result.Text.Length - outputStart;
+
+                    if (length != 0)
+                    {
+                        result.BoldRanges.Insert(boldInsertionIndex,
+                            new TextBoldRange(outputStart, length));
+                        result.FontSizeRanges.Insert(fontSizeInsertionIndex,
+                            new MarkupFontSizeRange(outputStart, length, tag.HeadingLevel));
+                    }
+
+                    break;
+                }
+                case BbCodeKind.Url:
+                    ApplyUrl(source, tag, contentEnd, result, outputStart);
+                    break;
+                case BbCodeKind.Image:
+                    ApplyImage(source, tag.EndIndex, contentEnd, result);
+                    break;
+                case BbCodeKind.Timestamp:
+                    ApplyTimestamp(source, tag.EndIndex, contentEnd, result);
+                    break;
+                case BbCodeKind.Code:
+                    result.Text.Append(source, tag.EndIndex, contentEnd - tag.EndIndex);
+                    break;
+                case BbCodeKind.Quote:
+                    result.Text.Append("› ");
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    break;
+                case BbCodeKind.ListItem:
+                    result.Text.Append("• ");
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    break;
+                case BbCodeKind.List:
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    break;
+                default:
+                    ParseRange(source, tag.EndIndex, contentEnd, result);
+                    break;
+            }
+        }
+
+        private static void ApplyUrl(string source, BbCodeTag tag, int contentEnd,
+            FormattedTextMarkupResult result, int outputStart)
+        {
+            ParseRange(source, tag.EndIndex, contentEnd, result);
+            var target = string.IsNullOrWhiteSpace(tag.Value)
+                ? StripMarkup(source, tag.EndIndex, contentEnd)
+                : NormalizeTarget(tag.Value);
+            var length = result.Text.Length - outputStart;
+
+            if (length == 0 && target.Length != 0)
+            {
+                result.Text.Append(target);
+                length = target.Length;
+            }
+
+            if (length != 0 && target.Length != 0 &&
+                !target.StartsWith(SpriteTextPlusFormattable.TimestampLinkTargetPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+                result.LinkRanges.Add(new TextLinkRange(outputStart, length, target));
+        }
+
+        private static void ApplyImage(string source, int contentStart, int contentEnd,
+            FormattedTextMarkupResult result)
+        {
+            var target = StripMarkup(source, contentStart, contentEnd);
 
             if (target.Length == 0)
                 return;
 
             var outputStart = result.Text.Length;
             result.Text.Append(target);
-            result.LinkRanges.Add(new TextLinkRange(outputStart, target.Length, target));
+
+            if (!target.StartsWith(SpriteTextPlusFormattable.TimestampLinkTargetPrefix,
+                    StringComparison.OrdinalIgnoreCase))
+                result.LinkRanges.Add(new TextLinkRange(outputStart, target.Length, target));
         }
 
-        private static int GetStyleRangeCount(FormattedTextMarkupResult result, MarkupStyleKind kind)
+        private static void ApplyTimestamp(string source, int contentStart, int contentEnd,
+            FormattedTextMarkupResult result)
         {
-            switch (kind)
-            {
-                case MarkupStyleKind.Size:
-                    return result.FontSizeRanges.Count;
-                case MarkupStyleKind.Underline:
-                    return result.UnderlineRanges.Count;
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(kind));
-            }
+            var timestamp = StripMarkup(source, contentStart, contentEnd);
+
+            if (timestamp.Length == 0)
+                return;
+
+            var outputStart = result.Text.Length;
+            result.Text.Append(timestamp);
+
+            if (IsMapTimestamp(timestamp))
+                result.LinkRanges.Add(new TextLinkRange(outputStart, timestamp.Length,
+                    SpriteTextPlusFormattable.TimestampLinkTargetPrefix + timestamp));
         }
 
-        private static void InsertStyleRange(FormattedTextMarkupResult result, OpeningStyleTag tag, int insertionIndex, int startIndex, int length)
+        private static string StripMarkup(string source, int start, int end)
         {
-            switch (tag.Kind)
-            {
-                case MarkupStyleKind.Size:
-                    result.FontSizeRanges.Insert(insertionIndex, new TextFontSizeRange(startIndex, length, tag.FontSize));
-                    break;
-                case MarkupStyleKind.Underline:
-                    result.UnderlineRanges.Insert(insertionIndex, new TextUnderlineRange(startIndex, length));
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException();
-            }
+            var stripped = new FormattedTextMarkupResult();
+            ParseRange(source, start, end, stripped);
+            return stripped.Text.ToString().Trim();
         }
 
-        private static bool TryReadOpeningStyleTag(string source, int start, int end, out OpeningStyleTag tag)
+        private static void AddBoldRange(FormattedTextMarkupResult result, int insertionIndex,
+            int outputStart)
         {
-            tag = default;
+            var length = result.Text.Length - outputStart;
 
-            if (!TryFindUnescaped(source, "]", start + 1, end, out var bracketEnd))
-                return false;
-
-            var content = source.Substring(start + 1, bracketEnd - start - 1).Trim();
-
-            if (content.Equals("u", StringComparison.OrdinalIgnoreCase) ||
-                content.Equals("underline", StringComparison.OrdinalIgnoreCase))
-            {
-                tag = new OpeningStyleTag(MarkupStyleKind.Underline, bracketEnd + 1);
-                return true;
-            }
-
-            const string sizePrefix = "size=";
-            if (content.StartsWith(sizePrefix, StringComparison.OrdinalIgnoreCase) &&
-                float.TryParse(content.Substring(sizePrefix.Length).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var fontSize) && fontSize > 0 &&
-                !float.IsNaN(fontSize) && !float.IsInfinity(fontSize))
-            {
-                tag = new OpeningStyleTag(fontSize, bracketEnd + 1);
-                return true;
-            }
-
-            return false;
+            if (length != 0)
+                result.BoldRanges.Insert(insertionIndex, new TextBoldRange(outputStart, length));
         }
 
-        private static bool TryFindClosingStyleTag(string source, int start, int end, MarkupStyleKind kind, out int closingStart, out int closingEnd)
+        private static void AddItalicRange(FormattedTextMarkupResult result, int insertionIndex,
+            int outputStart)
+        {
+            var length = result.Text.Length - outputStart;
+
+            if (length != 0)
+                result.ItalicRanges.Insert(insertionIndex,
+                    new TextItalicRange(outputStart, length));
+        }
+
+        private static void AddUnderlineRange(FormattedTextMarkupResult result,
+            int insertionIndex, int outputStart)
+        {
+            var length = result.Text.Length - outputStart;
+
+            if (length != 0)
+                result.UnderlineRanges.Insert(insertionIndex,
+                    new TextUnderlineRange(outputStart, length));
+        }
+
+        private static bool TryFindClosingTag(string source, int start, int end,
+            string canonicalName, out int closingStart, out int closingEnd)
         {
             var depth = 1;
+            var index = start;
 
-            for (var index = start; index < end; index++)
+            while (index < end)
             {
-                if (source[index] != '[' || IsEscaped(source, index))
-                    continue;
-
-                if (TryReadOpeningStyleTag(source, index, end, out var opening) && opening.Kind == kind)
+                if (source[index] != '[' || IsEscaped(source, index) ||
+                    !TryReadTag(source, index, end, out var tag))
                 {
-                    depth++;
-                    index = opening.EndIndex - 1;
+                    index++;
                     continue;
                 }
 
-                if (!TryReadClosingStyleTag(source, index, end, out var closingKind, out var tagEnd) ||
-                    closingKind != kind)
-                    continue;
-
-                depth--;
-
-                if (depth == 0)
+                if (tag.CanonicalName.Equals(canonicalName, StringComparison.OrdinalIgnoreCase))
                 {
-                    closingStart = index;
-                    closingEnd = tagEnd;
-                    return true;
+                    if (tag.IsClosing)
+                        depth--;
+                    else if (!IsStandalone(tag.Kind))
+                        depth++;
+
+                    if (depth == 0)
+                    {
+                        closingStart = index;
+                        closingEnd = tag.EndIndex;
+                        return true;
+                    }
                 }
 
-                index = tagEnd - 1;
+                index = tag.EndIndex;
             }
 
             closingStart = -1;
@@ -214,155 +317,157 @@ namespace Wobble.Graphics.Sprites.Text
             return false;
         }
 
-        private static bool TryReadClosingStyleTag(string source, int start, int end, out MarkupStyleKind kind, out int tagEnd)
+        private static bool TryReadTag(string source, int start, int end, out BbCodeTag tag)
         {
-            kind = default;
-            tagEnd = -1;
+            tag = default;
 
-            if (!TryFindUnescaped(source, "]", start + 1, end, out var bracketEnd))
+            if (source[start] != '[' || IsEscaped(source, start))
+                return false;
+
+            var bracketEnd = start + 1;
+
+            while (bracketEnd < end && source[bracketEnd] != ']' &&
+                   source[bracketEnd] != '\r' && source[bracketEnd] != '\n')
+                bracketEnd++;
+
+            if (bracketEnd >= end || source[bracketEnd] != ']')
                 return false;
 
             var content = source.Substring(start + 1, bracketEnd - start - 1).Trim();
 
-            if (content.Equals("/size", StringComparison.OrdinalIgnoreCase))
-                kind = MarkupStyleKind.Size;
-            else if (content.Equals("/u", StringComparison.OrdinalIgnoreCase) ||
-                     content.Equals("/underline", StringComparison.OrdinalIgnoreCase))
-                kind = MarkupStyleKind.Underline;
-            else
+            if (content.Length == 0)
                 return false;
 
-            tagEnd = bracketEnd + 1;
+            var isClosing = content[0] == '/';
+
+            if (isClosing)
+                content = content.Substring(1).TrimStart();
+
+            if (content.EndsWith("/", StringComparison.Ordinal))
+                content = content.Substring(0, content.Length - 1).TrimEnd();
+
+            var separator = content.IndexOf('=');
+            var name = (separator == -1 ? content : content.Substring(0, separator)).Trim();
+            var value = separator == -1 ? string.Empty : content.Substring(separator + 1).Trim();
+
+            if (!IsValidTagName(name))
+                return false;
+
+            value = TrimQuotes(value);
+            var kind = GetTagKind(name, out var canonicalName, out var headingLevel);
+            tag = new BbCodeTag(kind, canonicalName, value, headingLevel, isClosing,
+                bracketEnd + 1);
             return true;
         }
 
-        private static bool TryReadLink(string source, int start, int end, out MarkupLink link)
+        private static BbCodeKind GetTagKind(string name, out string canonicalName,
+            out int headingLevel)
         {
-            link = default;
-            var labelEnd = -1;
-            var labelDepth = 1;
+            canonicalName = name.ToLowerInvariant();
+            headingLevel = 0;
 
-            for (var index = start + 1; index < end; index++)
+            switch (canonicalName)
             {
-                if (IsEscaped(source, index))
-                    continue;
-
-                if (source[index] == '[')
-                    labelDepth++;
-                else if (source[index] == ']')
-                {
-                    labelDepth--;
-
-                    if (labelDepth == 0)
-                    {
-                        if (index + 1 >= end || source[index + 1] != '(')
-                            return false;
-
-                        labelEnd = index;
-                        break;
-                    }
-                }
+                case "b":
+                case "strong":
+                    canonicalName = "b";
+                    return BbCodeKind.Bold;
+                case "i":
+                case "em":
+                    canonicalName = "i";
+                    return BbCodeKind.Italic;
+                case "u":
+                case "underline":
+                    canonicalName = "u";
+                    return BbCodeKind.Underline;
+                case "color":
+                case "colour":
+                    canonicalName = "color";
+                    return BbCodeKind.Color;
+                case "size":
+                    return BbCodeKind.Size;
+                case "url":
+                    return BbCodeKind.Url;
+                case "img":
+                    return BbCodeKind.Image;
+                case "code":
+                    return BbCodeKind.Code;
+                case "timestamp":
+                    return BbCodeKind.Timestamp;
+                case "quote":
+                    return BbCodeKind.Quote;
+                case "list":
+                    return BbCodeKind.List;
+                case "li":
+                    return BbCodeKind.ListItem;
+                case "*":
+                    return BbCodeKind.ListMarker;
+                case "hr":
+                    return BbCodeKind.HorizontalRule;
+                case "br":
+                    return BbCodeKind.LineBreak;
             }
 
-            if (labelEnd == -1)
-                return false;
-
-            var targetStart = labelEnd + 2;
-            var depth = 1;
-
-            for (var index = targetStart; index < end; index++)
+            if (canonicalName.Length == 2 && canonicalName[0] == 'h' &&
+                canonicalName[1] >= '1' && canonicalName[1] <= '6')
             {
-                if (IsEscaped(source, index))
-                    continue;
-
-                if (source[index] == '(')
-                    depth++;
-                else if (source[index] == ')')
-                {
-                    depth--;
-
-                    if (depth == 0)
-                    {
-                        link = new MarkupLink(start + 1, labelEnd, source.Substring(targetStart, index - targetStart), index + 1);
-                        return true;
-                    }
-                }
+                headingLevel = canonicalName[1] - '0';
+                return BbCodeKind.Heading;
             }
 
-            return false;
+            return BbCodeKind.Unknown;
         }
 
-        private static bool TryReadColor(string source, int start, int end, out MarkupColor color)
+        private static bool IsStandalone(BbCodeKind kind) =>
+            kind == BbCodeKind.LineBreak || kind == BbCodeKind.HorizontalRule ||
+            kind == BbCodeKind.ListMarker;
+
+        private static bool IsValidTagName(string name)
         {
-            color = default;
-            var bracketStart = -1;
+            if (name == "*")
+                return true;
 
-            for (var index = start + 1; index < end && index <= start + 9; index++)
+            if (name.Length == 0)
+                return false;
+
+            for (var i = 0; i < name.Length; i++)
             {
-                if (source[index] == '[')
-                {
-                    bracketStart = index;
-                    break;
-                }
-
-                if (!Uri.IsHexDigit(source[index]))
+                if (!char.IsLetterOrDigit(name[i]))
                     return false;
             }
 
-            if (bracketStart == -1 ||
-                !TryParseHexColor(source.Substring(start, bracketStart - start), out var parsedColor) ||
-                !TryFindClosingBracket(source, bracketStart + 1, end, out var bracketEnd))
-                return false;
-
-            color = new MarkupColor(parsedColor, bracketStart + 1, bracketEnd, bracketEnd + 1);
             return true;
         }
 
-        private static bool TryFindClosingBracket(string source, int start, int end, out int closingIndex)
+        private static string TrimQuotes(string value)
         {
-            var depth = 1;
+            if (value.Length >= 2 &&
+                ((value[0] == '"' && value[value.Length - 1] == '"') ||
+                 (value[0] == '\'' && value[value.Length - 1] == '\'')))
+                return value.Substring(1, value.Length - 2);
 
-            for (var index = start; index < end; index++)
-            {
-                if (IsEscaped(source, index))
-                    continue;
-
-                if (source[index] == '[')
-                    depth++;
-                else if (source[index] == ']')
-                {
-                    depth--;
-
-                    if (depth == 0)
-                    {
-                        closingIndex = index;
-                        return true;
-                    }
-                }
-            }
-
-            closingIndex = -1;
-            return false;
+            return value;
         }
 
-        private static string UnescapeLinkTarget(string target)
+        private static string NormalizeTarget(string target)
         {
-            var result = new StringBuilder(target.Length);
+            target = TrimQuotes(target.Trim());
 
             for (var i = 0; i < target.Length; i++)
             {
-                if (target[i] == '\\' && i + 1 < target.Length &&
-                    (target[i + 1] == '\\' || target[i + 1] == '(' || target[i + 1] == ')'))
-                {
-                    result.Append(target[++i]);
+                if (!char.IsWhiteSpace(target[i]))
                     continue;
-                }
 
-                result.Append(target[i]);
+                return target.Substring(0, i);
             }
 
-            return result.ToString();
+            return target;
         }
+
+        private static bool TryParseFontSize(string value, out float fontSize) =>
+            float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture,
+                out fontSize) && fontSize > 0 && !float.IsNaN(fontSize) &&
+            !float.IsInfinity(fontSize);
 
         private static bool TryParseHexColor(string value, out Color color)
         {
@@ -386,44 +491,54 @@ namespace Wobble.Graphics.Sprites.Text
             if (hex.Length != 6 && hex.Length != 8)
                 return false;
 
-            if (!byte.TryParse(hex.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var red) ||
-                !byte.TryParse(hex.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var green) ||
-                !byte.TryParse(hex.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var blue))
+            if (!byte.TryParse(hex.Substring(0, 2), NumberStyles.HexNumber,
+                    CultureInfo.InvariantCulture, out var red) ||
+                !byte.TryParse(hex.Substring(2, 2), NumberStyles.HexNumber,
+                    CultureInfo.InvariantCulture, out var green) ||
+                !byte.TryParse(hex.Substring(4, 2), NumberStyles.HexNumber,
+                    CultureInfo.InvariantCulture, out var blue))
                 return false;
 
             var alpha = byte.MaxValue;
 
-            if (hex.Length == 8 &&
-                !byte.TryParse(hex.Substring(6, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out alpha))
+            if (hex.Length == 8 && !byte.TryParse(hex.Substring(6, 2),
+                    NumberStyles.HexNumber, CultureInfo.InvariantCulture, out alpha))
                 return false;
 
             color = new Color(red, green, blue, alpha);
             return true;
         }
 
-        private static bool TryFindUnescaped(string source, string value, int start, int end, out int foundIndex)
+        private static bool IsMapTimestamp(string value)
         {
-            for (var index = start; index <= end - value.Length; index++)
-            {
-                if (!IsEscaped(source, index) && StartsWith(source, index, end, value))
-                {
-                    foundIndex = index;
-                    return true;
-                }
-            }
-
-            foundIndex = -1;
-            return false;
-        }
-
-        private static bool StartsWith(string source, int index, int end, string value)
-        {
-            if (index + value.Length > end)
+            if (value.Length == 0)
                 return false;
 
-            for (var i = 0; i < value.Length; i++)
+            var index = 0;
+
+            while (index < value.Length)
             {
-                if (source[index + i] != value[i])
+                var digitStart = index;
+
+                while (index < value.Length && char.IsDigit(value[index]))
+                    index++;
+
+                if (digitStart == index)
+                    return false;
+
+                if (index == value.Length)
+                    return true;
+
+                if (value[index++] != '|' || index >= value.Length ||
+                    !char.IsDigit(value[index]))
+                    return false;
+
+                index++;
+
+                if (index == value.Length)
+                    return true;
+
+                if (value[index++] != ',')
                     return false;
             }
 
@@ -441,66 +556,75 @@ namespace Wobble.Graphics.Sprites.Text
         }
 
         private static bool IsEscapable(char value) =>
-            value == '\\' || value == '*' || value == '#' || value == '[' || value == ']' ||
-            value == '(' || value == ')';
+            value == '\\' || value == '[' || value == ']';
 
-        private enum MarkupStyleKind
+        private enum BbCodeKind
         {
+            Unknown,
+            Bold,
+            Italic,
+            Underline,
+            Color,
             Size,
-            Underline
+            Url,
+            Image,
+            Code,
+            Timestamp,
+            Heading,
+            Quote,
+            List,
+            ListItem,
+            ListMarker,
+            HorizontalRule,
+            LineBreak
         }
 
-        private readonly struct OpeningStyleTag
+        private readonly struct BbCodeTag
         {
-            public MarkupStyleKind Kind { get; }
-            public float FontSize { get; }
+            public BbCodeKind Kind { get; }
+            public string CanonicalName { get; }
+            public string Value { get; }
+            public int HeadingLevel { get; }
+            public bool IsClosing { get; }
             public int EndIndex { get; }
 
-            public OpeningStyleTag(MarkupStyleKind kind, int endIndex)
+            public BbCodeTag(BbCodeKind kind, string canonicalName, string value,
+                int headingLevel, bool isClosing, int endIndex)
             {
                 Kind = kind;
-                FontSize = 0;
-                EndIndex = endIndex;
-            }
-
-            public OpeningStyleTag(float fontSize, int endIndex)
-            {
-                Kind = MarkupStyleKind.Size;
-                FontSize = fontSize;
+                CanonicalName = canonicalName;
+                Value = value;
+                HeadingLevel = headingLevel;
+                IsClosing = isClosing;
                 EndIndex = endIndex;
             }
         }
+    }
 
-        private readonly struct MarkupColor
+    internal readonly struct MarkupFontSizeRange
+    {
+        public int StartIndex { get; }
+        public int Length { get; }
+        public float FontSize { get; }
+        public int HeadingLevel { get; }
+        public bool IsHeading { get; }
+
+        public MarkupFontSizeRange(int startIndex, int length, float fontSize)
         {
-            public Color Color { get; }
-            public int ContentStart { get; }
-            public int ContentEnd { get; }
-            public int EndIndex { get; }
-
-            public MarkupColor(Color color, int contentStart, int contentEnd, int endIndex)
-            {
-                Color = color;
-                ContentStart = contentStart;
-                ContentEnd = contentEnd;
-                EndIndex = endIndex;
-            }
+            StartIndex = startIndex;
+            Length = length;
+            FontSize = fontSize;
+            HeadingLevel = 0;
+            IsHeading = false;
         }
 
-        private readonly struct MarkupLink
+        public MarkupFontSizeRange(int startIndex, int length, int headingLevel)
         {
-            public int LabelStart { get; }
-            public int LabelEnd { get; }
-            public string Target { get; }
-            public int EndIndex { get; }
-
-            public MarkupLink(int labelStart, int labelEnd, string target, int endIndex)
-            {
-                LabelStart = labelStart;
-                LabelEnd = labelEnd;
-                Target = target;
-                EndIndex = endIndex;
-            }
+            StartIndex = startIndex;
+            Length = length;
+            FontSize = 0;
+            HeadingLevel = headingLevel;
+            IsHeading = true;
         }
     }
 
@@ -508,8 +632,9 @@ namespace Wobble.Graphics.Sprites.Text
     {
         public StringBuilder Text { get; } = new StringBuilder();
         public List<TextBoldRange> BoldRanges { get; } = new List<TextBoldRange>();
+        public List<TextItalicRange> ItalicRanges { get; } = new List<TextItalicRange>();
         public List<TextColorRange> ColorRanges { get; } = new List<TextColorRange>();
-        public List<TextFontSizeRange> FontSizeRanges { get; } = new List<TextFontSizeRange>();
+        public List<MarkupFontSizeRange> FontSizeRanges { get; } = new List<MarkupFontSizeRange>();
         public List<TextUnderlineRange> UnderlineRanges { get; } = new List<TextUnderlineRange>();
         public List<TextLinkRange> LinkRanges { get; } = new List<TextLinkRange>();
     }

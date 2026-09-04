@@ -58,11 +58,17 @@ namespace Wobble.Graphics.Sprites.Text
         /// <summary>
         ///     Builds a line layout. Later size ranges take precedence when ranges overlap.
         /// </summary>
-        public static FormattedTextLineLayout Build(WobbleFontStore font, WobbleFontStore boldFont, string text, float defaultFontSize, IReadOnlyList<TextFontSizeRange> sizeRanges, IReadOnlyList<TextBoldRange> boldRanges)
+        public static FormattedTextLineLayout Build(WobbleFontStore font, WobbleFontStore boldFont,
+            WobbleFontStore italicFont, WobbleFontStore boldItalicFont, string text,
+            float defaultFontSize, IReadOnlyList<TextFontSizeRange> sizeRanges,
+            IReadOnlyList<TextBoldRange> boldRanges, IReadOnlyList<TextItalicRange> italicRanges)
         {
             text = text ?? "";
             boldFont = boldFont ?? font;
-            var runs = CreateRuns(font, boldFont, text, defaultFontSize, sizeRanges, boldRanges);
+            italicFont = italicFont ?? font;
+            boldItalicFont = boldItalicFont ?? boldFont;
+            var runs = CreateRuns(font, boldFont, italicFont, boldItalicFont, text,
+                defaultFontSize, sizeRanges, boldRanges, italicRanges);
 
             if (runs.Count == 0)
             {
@@ -175,7 +181,12 @@ namespace Wobble.Graphics.Sprites.Text
         /// <summary>
         ///     Splits text at font and size boundaries and merges adjacent ranges with the same effective style.
         /// </summary>
-        private static List<FormattedTextRun> CreateRuns(WobbleFontStore font, WobbleFontStore boldFont, string text, float defaultFontSize, IReadOnlyList<TextFontSizeRange> sizeRanges, IReadOnlyList<TextBoldRange> boldRanges)
+        private static List<FormattedTextRun> CreateRuns(WobbleFontStore font,
+            WobbleFontStore boldFont, WobbleFontStore italicFont,
+            WobbleFontStore boldItalicFont, string text, float defaultFontSize,
+            IReadOnlyList<TextFontSizeRange> sizeRanges,
+            IReadOnlyList<TextBoldRange> boldRanges,
+            IReadOnlyList<TextItalicRange> italicRanges)
         {
             var result = new List<FormattedTextRun>();
 
@@ -191,6 +202,10 @@ namespace Wobble.Graphics.Sprites.Text
 
             for (var i = 0; i < boldRanges.Count; i++)
                 AddBoundaries(boundaries, text.Length, boldRanges[i].StartIndex, boldRanges[i].Length);
+
+            for (var i = 0; i < italicRanges.Count; i++)
+                AddBoundaries(boundaries, text.Length, italicRanges[i].StartIndex,
+                    italicRanges[i].Length);
 
             boundaries.Sort();
 
@@ -212,7 +227,7 @@ namespace Wobble.Graphics.Sprites.Text
                         fontSize = range.FontSize;
                 }
 
-                var runFont = font;
+                var isBold = false;
 
                 for (var rangeIndex = 0; rangeIndex < boldRanges.Count; rangeIndex++)
                 {
@@ -220,10 +235,27 @@ namespace Wobble.Graphics.Sprites.Text
 
                     if (start >= range.StartIndex && start < range.StartIndex + range.Length)
                     {
-                        runFont = boldFont;
+                        isBold = true;
                         break;
                     }
                 }
+
+                var isItalic = false;
+
+                for (var rangeIndex = 0; rangeIndex < italicRanges.Count; rangeIndex++)
+                {
+                    var range = italicRanges[rangeIndex];
+
+                    if (start >= range.StartIndex && start < range.StartIndex + range.Length)
+                    {
+                        isItalic = true;
+                        break;
+                    }
+                }
+
+                var runFont = isBold
+                    ? isItalic ? boldItalicFont : boldFont
+                    : isItalic ? italicFont : font;
 
                 if (result.Count != 0 && result[result.Count - 1].FontSize == fontSize &&
                     ReferenceEquals(result[result.Count - 1].Font, runFont))

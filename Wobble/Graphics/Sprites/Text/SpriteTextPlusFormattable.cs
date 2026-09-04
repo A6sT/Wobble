@@ -7,28 +7,52 @@ using Wobble.Graphics.UI.Buttons;
 namespace Wobble.Graphics.Sprites.Text
 {
     /// <summary>
-    ///     A <see cref="SpriteTextPlus"/> that parses lightweight markup and supports bold, custom colors,
-    ///     font sizes, underlines, and links over character ranges.
-    ///     Supported markup: <c>**bold**</c>, <c>#RRGGBB[text]</c>,
-    ///     <c>[size=20]text[/size]</c>, <c>[u]text[/u]</c>, and <c>[label](target)</c>.
-    ///     Markup can be nested and special characters can be escaped with a backslash.
+    ///     A <see cref="SpriteTextPlus"/> that parses BBCode formatting and clickable ranges.
+    ///     Supported tags include bold, italic, underline, color, size, headings, code, quotes,
+    ///     lists, URLs, images, and timestamps. Tags can be nested and brackets can be escaped
+    ///     with a backslash.
     /// </summary>
     public class SpriteTextPlusFormattable : SpriteTextPlus
     {
         /// <summary>
-        ///     Whether this drawable refreshes when its separate bold font store changes.
+        ///     Prefix assigned to link targets produced by [timestamp] BBCode. Consumers can subscribe
+        ///     to <see cref="LinkClicked"/> and decide how timestamps behave in their own context.
         /// </summary>
-        private readonly bool _subscribesToBoldFontChanges;
+        public const string TimestampLinkTargetPrefix = "timestamp:";
+
+        /// <summary>
+        ///     Removes BBCode tags and returns the text that would be displayed by this drawable.
+        ///     This is useful for plain-text previews that perform their own truncation.
+        /// </summary>
+        public static string StripFormatting(string markup) =>
+            FormattedTextMarkupParser.Parse(markup).Text.ToString();
+
+        /// <summary>
+        ///     Whether this drawable refreshes when a separate formatting font store changes.
+        /// </summary>
+        private readonly bool _subscribesToFormattingFontChanges;
+
+        private readonly HashSet<WobbleFontStore> _formattingFontSubscriptions =
+            new HashSet<WobbleFontStore>();
 
         /// <summary>
         ///     Whether bold ranges should follow changes to <see cref="SpriteTextPlus.Font"/>.
         /// </summary>
         private bool _usesBaseFontForBold;
 
+        private readonly bool _usesBaseFontForItalic;
+
+        private readonly bool _usesBoldFontForBoldItalic;
+
         /// <summary>
         ///     Character ranges rendered with <see cref="BoldFont"/>.
         /// </summary>
         private readonly List<TextBoldRange> _textBoldRanges = new List<TextBoldRange>();
+
+        /// <summary>
+        ///     Character ranges rendered with <see cref="ItalicFont"/>.
+        /// </summary>
+        private readonly List<TextItalicRange> _textItalicRanges = new List<TextItalicRange>();
 
         /// <summary>
         ///     Character ranges with custom colors. Later ranges take precedence when ranges overlap.
@@ -54,6 +78,11 @@ namespace Wobble.Graphics.Sprites.Text
         ///     Character ranges with custom font sizes. Later ranges take precedence when ranges overlap.
         /// </summary>
         private readonly List<TextFontSizeRange> _textFontSizeRanges = new List<TextFontSizeRange>();
+
+        private readonly List<MarkupFontSizeRange> _markupFontSizeRanges =
+            new List<MarkupFontSizeRange>();
+
+        private bool UsesMarkupFontSizeRanges { get; set; }
 
         /// <summary>
         ///     Current size-aware wrapped layout, or null while the text uses one font size.
@@ -95,7 +124,7 @@ namespace Wobble.Graphics.Sprites.Text
         }
 
         /// <summary>
-        ///     Font used by <c>**bold**</c> ranges. Defaults to <see cref="SpriteTextPlus.Font"/> when no
+        ///     Font used by <c>[b]bold[/b]</c> ranges. Defaults to <see cref="SpriteTextPlus.Font"/> when no
         ///     distinct bold font is supplied.
         /// </summary>
         private WobbleFontStore _boldFont;
@@ -110,21 +139,32 @@ namespace Wobble.Graphics.Sprites.Text
                 if (ReferenceEquals(_boldFont, value))
                 {
                     _usesBaseFontForBold = usesBaseFont;
+                    RefreshFormattingFontSubscriptions();
                     return;
                 }
 
-                if (_boldFont != null && _subscribesToBoldFontChanges && !ReferenceEquals(_boldFont, Font))
-                    _boldFont.Changed -= OnBoldFontChanged;
-
                 _boldFont = value;
                 _usesBaseFontForBold = usesBaseFont;
+                if (_usesBoldFontForBoldItalic)
+                    _boldItalicFont = value;
 
-                if (_subscribesToBoldFontChanges && !ReferenceEquals(_boldFont, Font))
-                    _boldFont.Changed += OnBoldFontChanged;
-
+                RefreshFormattingFontSubscriptions();
                 RefreshText();
             }
         }
+
+        /// <summary>
+        ///     Font used by italic BBCode ranges. Defaults to <see cref="SpriteTextPlus.Font"/>.
+        /// </summary>
+        private WobbleFontStore _italicFont;
+        public WobbleFontStore ItalicFont => _italicFont;
+
+        /// <summary>
+        ///     Font used by ranges that combine strong emphasis and emphasis. Defaults to
+        ///     <see cref="BoldFont"/>.
+        /// </summary>
+        private WobbleFontStore _boldItalicFont;
+        public WobbleFontStore BoldItalicFont => _boldItalicFont;
 
         /// <summary>
         ///     Default color applied to linked character ranges. Explicit color ranges take precedence.
@@ -157,8 +197,13 @@ namespace Wobble.Graphics.Sprites.Text
 
                 if (_usesBaseFontForBold)
                     _boldFont = value;
+                if (_usesBaseFontForItalic)
+                    _italicFont = value;
+                if (_usesBoldFontForBoldItalic)
+                    _boldItalicFont = _boldFont;
 
                 base.Font = value;
+                RefreshFormattingFontSubscriptions();
             }
         }
 
@@ -175,7 +220,7 @@ namespace Wobble.Graphics.Sprites.Text
         /// <param name="cache"></param>
         /// <param name="subscribeToFontChanges"></param>
         public SpriteTextPlusFormattable(WobbleFontStore font, string text, int size = 0, bool cache = true, bool subscribeToFontChanges = true)
-            : this(font, null, text, size, cache, subscribeToFontChanges)
+            : this(font, null, null, null, text, size, cache, subscribeToFontChanges)
         {
         }
 
@@ -188,14 +233,33 @@ namespace Wobble.Graphics.Sprites.Text
         /// <param name="cache"></param>
         /// <param name="subscribeToFontChanges"></param>
         public SpriteTextPlusFormattable(WobbleFontStore font, WobbleFontStore boldFont, string text, int size = 0, bool cache = true, bool subscribeToFontChanges = true)
+            : this(font, boldFont, null, null, text, size, cache, subscribeToFontChanges)
+        {
+        }
+
+        /// <summary>
+        /// </summary>
+        /// <param name="font"></param>
+        /// <param name="boldFont"></param>
+        /// <param name="italicFont"></param>
+        /// <param name="boldItalicFont"></param>
+        /// <param name="text"></param>
+        /// <param name="size"></param>
+        /// <param name="cache"></param>
+        /// <param name="subscribeToFontChanges"></param>
+        public SpriteTextPlusFormattable(WobbleFontStore font, WobbleFontStore boldFont,
+            WobbleFontStore italicFont, WobbleFontStore boldItalicFont, string text, int size = 0,
+            bool cache = true, bool subscribeToFontChanges = true)
             : base(font, string.Empty, size, cache, subscribeToFontChanges)
         {
-            _subscribesToBoldFontChanges = subscribeToFontChanges;
+            _subscribesToFormattingFontChanges = subscribeToFontChanges;
             _boldFont = boldFont ?? font;
             _usesBaseFontForBold = boldFont == null;
-
-            if (_subscribesToBoldFontChanges && !ReferenceEquals(_boldFont, Font))
-                _boldFont.Changed += OnBoldFontChanged;
+            _italicFont = italicFont ?? font;
+            _usesBaseFontForItalic = italicFont == null;
+            _boldItalicFont = boldItalicFont ?? _boldFont;
+            _usesBoldFontForBoldItalic = boldItalicFont == null;
+            RefreshFormattingFontSubscriptions();
 
             ApplyMarkup(text);
         }
@@ -210,11 +274,15 @@ namespace Wobble.Graphics.Sprites.Text
 
             _textBoldRanges.Clear();
             _textBoldRanges.AddRange(parsed.BoldRanges);
+            _textItalicRanges.Clear();
+            _textItalicRanges.AddRange(parsed.ItalicRanges);
             _hasTextColorOverlayRange = false;
             _textColorRanges.Clear();
             _textColorRanges.AddRange(parsed.ColorRanges);
-            _textFontSizeRanges.Clear();
-            _textFontSizeRanges.AddRange(parsed.FontSizeRanges);
+            _markupFontSizeRanges.Clear();
+            _markupFontSizeRanges.AddRange(parsed.FontSizeRanges);
+            UsesMarkupFontSizeRanges = true;
+
             _textUnderlineRanges.Clear();
             _textUnderlineRanges.AddRange(parsed.UnderlineRanges);
             _textLinkRanges.Clear();
@@ -229,7 +297,68 @@ namespace Wobble.Graphics.Sprites.Text
                 RefreshText();
         }
 
-        private void OnBoldFontChanged(object sender, EventArgs e) => RefreshText();
+        private void RefreshFormattingFontSubscriptions()
+        {
+            foreach (var font in _formattingFontSubscriptions)
+                font.Changed -= OnFormattingFontChanged;
+
+            _formattingFontSubscriptions.Clear();
+            if (!_subscribesToFormattingFontChanges)
+                return;
+
+            SubscribeToFormattingFont(_boldFont);
+            SubscribeToFormattingFont(_italicFont);
+            SubscribeToFormattingFont(_boldItalicFont);
+        }
+
+        private void SubscribeToFormattingFont(WobbleFontStore font)
+        {
+            if (font == null || ReferenceEquals(font, Font) || !_formattingFontSubscriptions.Add(font))
+                return;
+
+            font.Changed += OnFormattingFontChanged;
+        }
+
+        private void OnFormattingFontChanged(object sender, EventArgs e) => RefreshText();
+
+        private static float GetHeadingScale(int level)
+        {
+            switch (level)
+            {
+                case 1:
+                    return 1.8f;
+                case 2:
+                    return 1.5f;
+                case 3:
+                    return 1.3f;
+                case 4:
+                    return 1.15f;
+                case 5:
+                    return 1f;
+                default:
+                    return 0.9f;
+            }
+        }
+
+        private void RebuildMarkupFontSizeRanges()
+        {
+            _textFontSizeRanges.Clear();
+            for (var i = 0; i < _markupFontSizeRanges.Count; i++)
+            {
+                var range = _markupFontSizeRanges[i];
+                var fontSize = range.FontSize;
+                if (range.IsHeading)
+                    fontSize = FontSize * GetHeadingScale(range.HeadingLevel);
+
+                _textFontSizeRanges.Add(new TextFontSizeRange(range.StartIndex, range.Length, fontSize));
+            }
+        }
+
+        private void StopUsingMarkupFontSizeRanges()
+        {
+            UsesMarkupFontSizeRanges = false;
+            _markupFontSizeRanges.Clear();
+        }
 
         /// <summary>
         ///     Applies a color to a character range while preserving the text's original layout and kerning.
@@ -436,6 +565,56 @@ namespace Wobble.Graphics.Sprites.Text
         }
 
         /// <summary>
+        ///     Renders a character range with <see cref="ItalicFont"/>.
+        /// </summary>
+        public void SetTextItalicRange(int startIndex, int length)
+        {
+            var range = new TextItalicRange(startIndex, length);
+            ValidateTextItalicRange(range, nameof(startIndex), nameof(length));
+
+            _textItalicRanges.Clear();
+
+            if (length != 0)
+                _textItalicRanges.Add(range);
+
+            RefreshText();
+        }
+
+        /// <summary>
+        ///     Renders multiple character ranges with <see cref="ItalicFont"/>.
+        /// </summary>
+        public void SetTextItalicRanges(IReadOnlyList<TextItalicRange> ranges)
+        {
+            if (ranges == null)
+                throw new ArgumentNullException(nameof(ranges));
+
+            for (var i = 0; i < ranges.Count; i++)
+                ValidateTextItalicRange(ranges[i], nameof(ranges), nameof(ranges));
+
+            _textItalicRanges.Clear();
+
+            for (var i = 0; i < ranges.Count; i++)
+            {
+                if (ranges[i].Length != 0)
+                    _textItalicRanges.Add(ranges[i]);
+            }
+
+            RefreshText();
+        }
+
+        /// <summary>
+        ///     Clears all italic character ranges.
+        /// </summary>
+        public void ClearTextItalicRanges()
+        {
+            if (_textItalicRanges.Count == 0)
+                return;
+
+            _textItalicRanges.Clear();
+            RefreshText();
+        }
+
+        /// <summary>
         ///     Underlines a character range using its effective text color, including custom color ranges,
         ///     <see cref="Tint"/>, and <see cref="Alpha"/>.
         /// </summary>
@@ -500,6 +679,7 @@ namespace Wobble.Graphics.Sprites.Text
             var range = new TextFontSizeRange(startIndex, length, fontSize);
             ValidateTextFontSizeRange(range, nameof(startIndex), nameof(length), nameof(fontSize));
 
+            StopUsingMarkupFontSizeRanges();
             _textFontSizeRanges.Clear();
 
             if (length != 0)
@@ -520,6 +700,7 @@ namespace Wobble.Graphics.Sprites.Text
             for (var i = 0; i < ranges.Count; i++)
                 ValidateTextFontSizeRange(ranges[i], nameof(ranges), nameof(ranges), nameof(ranges));
 
+            StopUsingMarkupFontSizeRanges();
             _textFontSizeRanges.Clear();
 
             for (var i = 0; i < ranges.Count; i++)
@@ -539,6 +720,7 @@ namespace Wobble.Graphics.Sprites.Text
             if (_textFontSizeRanges.Count == 0)
                 return;
 
+            StopUsingMarkupFontSizeRanges();
             _textFontSizeRanges.Clear();
             RefreshText();
         }
@@ -619,6 +801,9 @@ namespace Wobble.Graphics.Sprites.Text
         /// <inheritdoc />
         protected override void OnTextLayoutRefreshed()
         {
+            if (UsesMarkupFontSizeRanges)
+                RebuildMarkupFontSizeRanges();
+
             ApplyTextFontSizeRanges();
             DisplayedLines = FormattedLines ?? (IsCached
                 ? BuildWrappedLayout()
@@ -644,7 +829,8 @@ namespace Wobble.Graphics.Sprites.Text
         /// </summary>
         private void ApplyTextFontSizeRanges()
         {
-            if (_textFontSizeRanges.Count == 0 && _textBoldRanges.Count == 0)
+            if (_textFontSizeRanges.Count == 0 && _textBoldRanges.Count == 0 &&
+                _textItalicRanges.Count == 0)
             {
                 FormattedLines = null;
                 return;
@@ -673,15 +859,20 @@ namespace Wobble.Graphics.Sprites.Text
             for (var i = 0; i < FormattedLines.Count; i++)
             {
                 var line = FormattedLines[i];
-                var lineSprite = new SpriteTextPlusLine(Font, line.Text, FontSize, BoldFont);
+                var lineSprite = new SpriteTextPlusLine(Font, line.Text, FontSize, BoldFont,
+                    ItalicFont, BoldItalicFont);
                 var lineSizeRanges = GetLineFontSizeRanges(line, 1);
                 var lineBoldRanges = GetLineBoldRanges(line);
+                var lineItalicRanges = GetLineItalicRanges(line);
 
                 if (lineSizeRanges.Count != 0)
                     lineSprite.SetTextFontSizeRanges(lineSizeRanges);
 
                 if (lineBoldRanges.Count != 0)
                     lineSprite.SetTextBoldRanges(lineBoldRanges);
+
+                if (lineItalicRanges.Count != 0)
+                    lineSprite.SetTextItalicRanges(lineItalicRanges);
 
                 lineSprite.Parent = this;
                 lineSprite.Y = height + lineSprite.VerticalLayoutOffset;
@@ -746,7 +937,10 @@ namespace Wobble.Graphics.Sprites.Text
             {
                 var ranges = GetFontSizeRanges(startIndex, line.Length, renderScale);
                 var boldRanges = GetBoldRanges(startIndex, line.Length);
-                var layout = FormattedTextLineLayout.Build(Font, BoldFont, line, FontSize * renderScale, ranges, boldRanges);
+                var italicRanges = GetItalicRanges(startIndex, line.Length);
+                var layout = FormattedTextLineLayout.Build(Font, BoldFont, ItalicFont,
+                    BoldItalicFont, line, FontSize * renderScale, ranges, boldRanges,
+                    italicRanges);
                 return maxWidth == null
                     ? layout.Width
                     : (float)Math.Ceiling(layout.Width) / renderScale;
@@ -757,7 +951,9 @@ namespace Wobble.Graphics.Sprites.Text
         ///     Creates a font- and size-aware layout for one displayed line.
         /// </summary>
         private FormattedTextLineLayout BuildFormattedLineLayout(WrappedTextLine line, float scale) =>
-            FormattedTextLineLayout.Build(Font, BoldFont, line.Text, FontSize * scale, GetLineFontSizeRanges(line, scale), GetLineBoldRanges(line));
+            FormattedTextLineLayout.Build(Font, BoldFont, ItalicFont, BoldItalicFont, line.Text,
+                FontSize * scale, GetLineFontSizeRanges(line, scale), GetLineBoldRanges(line),
+                GetLineItalicRanges(line));
 
         /// <summary>
         ///     Maps global font-size ranges to one displayed line.
@@ -808,6 +1004,33 @@ namespace Wobble.Graphics.Sprites.Text
 
                 if (start < end)
                     result.Add(new TextBoldRange(start - startIndex, end - start));
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        ///     Maps global italic ranges to one displayed line.
+        /// </summary>
+        private List<TextItalicRange> GetLineItalicRanges(WrappedTextLine line) =>
+            GetItalicRanges(line.Start, line.Length);
+
+        /// <summary>
+        ///     Maps global italic ranges to an arbitrary text slice.
+        /// </summary>
+        private List<TextItalicRange> GetItalicRanges(int startIndex, int length)
+        {
+            var result = new List<TextItalicRange>(_textItalicRanges.Count);
+            var endIndex = startIndex + length;
+
+            for (var i = 0; i < _textItalicRanges.Count; i++)
+            {
+                var range = _textItalicRanges[i];
+                var start = Math.Max(range.StartIndex, startIndex);
+                var end = Math.Min(range.StartIndex + range.Length, endIndex);
+
+                if (start < end)
+                    result.Add(new TextItalicRange(start - startIndex, end - start));
             }
 
             return result;
@@ -943,7 +1166,8 @@ namespace Wobble.Graphics.Sprites.Text
             {
                 var line = lines[i];
 
-                if (_textFontSizeRanges.Count == 0 && _textBoldRanges.Count == 0)
+                if (_textFontSizeRanges.Count == 0 && _textBoldRanges.Count == 0 &&
+                    _textItalicRanges.Count == 0)
                 {
                     Font.FontSize = FontSize;
                     SpriteTextPlusLineRaw.GetVerticalLayout(Font, out var lineHeight, out _, out _);
@@ -1070,6 +1294,19 @@ namespace Wobble.Graphics.Sprites.Text
         }
 
         /// <summary>
+        ///     Validates an italic range against the current text.
+        /// </summary>
+        private void ValidateTextItalicRange(TextItalicRange range, string startParameterName,
+            string lengthParameterName)
+        {
+            if (range.StartIndex < 0 || range.StartIndex > Text.Length)
+                throw new ArgumentOutOfRangeException(startParameterName);
+
+            if (range.Length < 0 || range.Length > Text.Length - range.StartIndex)
+                throw new ArgumentOutOfRangeException(lengthParameterName);
+        }
+
+        /// <summary>
         ///     Validates a font-size range against the current text.
         /// </summary>
         private void ValidateTextFontSizeRange(TextFontSizeRange range, string startParameterName, string lengthParameterName, string fontSizeParameterName)
@@ -1143,7 +1380,8 @@ namespace Wobble.Graphics.Sprites.Text
         /// <inheritdoc />
         public override void DrawToSpriteBatch()
         {
-            if (_textFontSizeRanges.Count == 0 && _textBoldRanges.Count == 0)
+            if (_textFontSizeRanges.Count == 0 && _textBoldRanges.Count == 0 &&
+                _textItalicRanges.Count == 0)
             {
                 DrawSingleSizeText();
                 return;
@@ -1371,8 +1609,10 @@ namespace Wobble.Graphics.Sprites.Text
         /// <inheritdoc />
         public override void Destroy()
         {
-            if (_boldFont != null && _subscribesToBoldFontChanges)
-                _boldFont.Changed -= OnBoldFontChanged;
+            foreach (var font in _formattingFontSubscriptions)
+                font.Changed -= OnFormattingFontChanged;
+
+            _formattingFontSubscriptions.Clear();
 
             LinkClicked = null;
             base.Destroy();

@@ -19,6 +19,16 @@ namespace Wobble.Graphics.Sprites.Text
         public WobbleFontStore BoldFont { get; }
 
         /// <summary>
+        ///     The font used by italic ranges.
+        /// </summary>
+        public WobbleFontStore ItalicFont { get; }
+
+        /// <summary>
+        ///     The font used by ranges that are both bold and italic.
+        /// </summary>
+        public WobbleFontStore BoldItalicFont { get; }
+
+        /// <summary>
         ///     The pt. font size
         /// </summary>
         private float _fontSize;
@@ -56,6 +66,12 @@ namespace Wobble.Graphics.Sprites.Text
         ///     Bold ranges relative to this line.
         /// </summary>
         private IReadOnlyList<TextBoldRange> TextBoldRanges { get; set; } = Array.Empty<TextBoldRange>();
+
+        /// <summary>
+        ///     Italic ranges relative to this line.
+        /// </summary>
+        private IReadOnlyList<TextItalicRange> TextItalicRanges { get; set; } =
+            Array.Empty<TextItalicRange>();
 
         /// <summary>
         ///     Custom colors relative to this line.
@@ -114,10 +130,14 @@ namespace Wobble.Graphics.Sprites.Text
         /// <param name="text"></param>
         /// <param name="size"></param>
         /// <param name="boldFont"></param>
-        public SpriteTextPlusLineRaw(WobbleFontStore font, string text, float size = 0, WobbleFontStore boldFont = null)
+        public SpriteTextPlusLineRaw(WobbleFontStore font, string text, float size = 0,
+            WobbleFontStore boldFont = null, WobbleFontStore italicFont = null,
+            WobbleFontStore boldItalicFont = null)
         {
             Font = font;
             BoldFont = boldFont ?? font;
+            ItalicFont = italicFont ?? font;
+            BoldItalicFont = boldItalicFont ?? BoldFont;
             Text = text;
 
             FontSize = size == 0 ? Font.DefaultSize : size;
@@ -192,6 +212,28 @@ namespace Wobble.Graphics.Sprites.Text
         }
 
         /// <summary>
+        ///     Applies italic styling to ranges of this line.
+        /// </summary>
+        internal void SetTextItalicRanges(IReadOnlyList<TextItalicRange> ranges)
+        {
+            TextItalicRanges = new List<TextItalicRange>(ranges);
+            RefreshSize();
+        }
+
+        /// <summary>
+        ///     Clears all italic styling from this line.
+        /// </summary>
+        internal bool ClearTextItalicRanges()
+        {
+            if (TextItalicRanges.Count == 0)
+                return false;
+
+            TextItalicRanges = Array.Empty<TextItalicRange>();
+            RefreshSize();
+            return true;
+        }
+
+        /// <summary>
         ///     Applies colors to ranges of this line.
         /// </summary>
         internal void SetTextColorRanges(IReadOnlyList<TextColorRange> ranges)
@@ -249,9 +291,12 @@ namespace Wobble.Graphics.Sprites.Text
 
         private void RefreshSize()
         {
-            if (TextFontSizeRanges.Count != 0 || TextBoldRanges.Count != 0)
+            if (TextFontSizeRanges.Count != 0 || TextBoldRanges.Count != 0 ||
+                TextItalicRanges.Count != 0)
             {
-                FormattedLayout = FormattedTextLineLayout.Build(Font, BoldFont, Text, FontSize, TextFontSizeRanges, TextBoldRanges);
+                FormattedLayout = FormattedTextLineLayout.Build(Font, BoldFont, ItalicFont,
+                    BoldItalicFont, Text, FontSize, TextFontSizeRanges, TextBoldRanges,
+                    TextItalicRanges);
                 MeasuredWidth = FormattedLayout.Width;
                 RenderPadding = Math.Max(2f, FormattedLayout.MaxFontSize * 0.25f);
                 LayoutHeight = FormattedLayout.Height;

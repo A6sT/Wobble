@@ -122,11 +122,14 @@ namespace Wobble.Graphics.Sprites.Text
         /// <param name="text"></param>
         /// <param name="size"></param>
         /// <param name="boldFont"></param>
-        public SpriteTextPlusLine(WobbleFontStore font, string text, float size = 0, WobbleFontStore boldFont = null)
+        public SpriteTextPlusLine(WobbleFontStore font, string text, float size = 0,
+            WobbleFontStore boldFont = null, WobbleFontStore italicFont = null,
+            WobbleFontStore boldItalicFont = null)
         {
             _scale = GetRenderScale();
 
-            _raw = new SpriteTextPlusLineRaw(font, text, size * _scale, boldFont)
+            _raw = new SpriteTextPlusLineRaw(font, text, size * _scale, boldFont, italicFont,
+                boldItalicFont)
             {
                 SpriteBatchOptions = new SpriteBatchOptions
                 {
@@ -240,6 +243,28 @@ namespace Wobble.Graphics.Sprites.Text
         internal void ClearTextBoldRanges()
         {
             if (!_raw.ClearTextBoldRanges())
+                return;
+
+            SetSize();
+            _dirty = true;
+        }
+
+        /// <summary>
+        ///     Applies italic styling to character ranges.
+        /// </summary>
+        internal void SetTextItalicRanges(IReadOnlyList<TextItalicRange> ranges)
+        {
+            _raw.SetTextItalicRanges(ranges);
+            SetSize();
+            _dirty = true;
+        }
+
+        /// <summary>
+        ///     Clears all italic styling from this line.
+        /// </summary>
+        internal void ClearTextItalicRanges()
+        {
+            if (!_raw.ClearTextItalicRanges())
                 return;
 
             SetSize();
